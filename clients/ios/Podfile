@@ -1,0 +1,26 @@
+platform :ios, '17.0'
+
+target 'NabtoShell' do
+  use_frameworks!
+
+  pod 'NabtoEdgeClientSwift', '~> 3.0'
+  pod 'SwiftCBOR', '~> 0.4'
+  # SwiftTerm is added via SPM in project.yml (no CocoaPods podspec available)
+  # NabtoEdgeIamUtil omitted: pairing is implemented directly via CoAP (2 endpoints)
+
+  target 'NabtoShellTests' do
+    inherit! :search_paths
+  end
+
+  target 'NabtoShellUITests' do
+    inherit! :search_paths
+  end
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '17.0'
+    end
+  end
+end
