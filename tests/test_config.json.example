@@ -1,9 +1,8 @@
 {
     "product_id": "pr-xxxxxxxx",
     "device_id": "de-xxxxxxxx",
-    "server_url": "https://pr-xxxxxxxx.clients.nabto.net",
-    "agent_binary": "../agent/_build/nabtoshell-agent",
-    "cli_binary": "../clients/cli/_build/nabtoshell",
+    "agent_binary": "/absolute/path/to/nabtoshell-agent",
+    "cli_binary": "/absolute/path/to/nabtoshell",
     "agent_home_dir": "/tmp/nabtoshell-test-agent",
     "client_home_dir": "/tmp/nabtoshell-test-client"
 }
