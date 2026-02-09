@@ -2,14 +2,63 @@
 
 #include <ctype.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #include <errno.h>
 
 #define NEWLINE "\n"
+#define NABTOSHELL_TMUX_TIMEOUT_MS 2000
+#define NABTOSHELL_TMUX_TERMINATE_GRACE_MS 200
+
+static int64_t monotonic_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ((int64_t)ts.tv_sec * 1000) + (ts.tv_nsec / 1000000);
+}
+
+static void terminate_process(pid_t pid)
+{
+    if (pid <= 0) {
+        return;
+    }
+    kill(pid, SIGTERM);
+    int64_t deadline = monotonic_ms() + NABTOSHELL_TMUX_TERMINATE_GRACE_MS;
+    int status;
+    while (monotonic_ms() < deadline) {
+        pid_t w = waitpid(pid, &status, WNOHANG);
+        if (w == pid) {
+            return;
+        }
+        usleep(10 * 1000);
+    }
+    kill(pid, SIGKILL);
+    waitpid(pid, &status, 0);
+}
+
+static bool waitpid_timeout(pid_t pid, int timeoutMs, int* status)
+{
+    int64_t deadline = monotonic_ms() + timeoutMs;
+    while (monotonic_ms() < deadline) {
+        pid_t w = waitpid(pid, status, WNOHANG);
+        if (w == pid) {
+            return true;
+        }
+        if (w < 0) {
+            return false;
+        }
+        usleep(10 * 1000);
+    }
+    terminate_process(pid);
+    return waitpid(pid, status, WNOHANG) == pid;
+}
 
 bool nabtoshell_tmux_validate_session_name(const char* name)
 {
@@ -56,7 +105,7 @@ bool nabtoshell_tmux_list_sessions(struct nabtoshell_tmux_list* list)
         close(pipefd[1]);
 
         /* Redirect stderr to /dev/null so "no server running" is silent */
-        int devnull = open("/dev/null", 0x0001); /* O_WRONLY */
+        int devnull = open("/dev/null", O_WRONLY);
         if (devnull >= 0) {
             dup2(devnull, STDERR_FILENO);
             close(devnull);
@@ -73,11 +122,42 @@ bool nabtoshell_tmux_list_sessions(struct nabtoshell_tmux_list* list)
 
     char buf[4096];
     ssize_t total = 0;
-    ssize_t n;
-    while ((n = read(pipefd[0], buf + total,
-                     sizeof(buf) - (size_t)total - 1)) > 0) {
-        total += n;
-        if ((size_t)total >= sizeof(buf) - 1) {
+    int64_t deadline = monotonic_ms() + NABTOSHELL_TMUX_TIMEOUT_MS;
+    while ((size_t)total < sizeof(buf) - 1 && monotonic_ms() < deadline) {
+        int remainingMs = (int)(deadline - monotonic_ms());
+        if (remainingMs < 1) {
+            remainingMs = 1;
+        }
+
+        struct pollfd pfd;
+        memset(&pfd, 0, sizeof(pfd));
+        pfd.fd = pipefd[0];
+        pfd.events = POLLIN | POLLHUP;
+
+        int pr = poll(&pfd, 1, remainingMs);
+        if (pr == 0) {
+            break;
+        }
+        if (pr < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+
+        if (pfd.revents & (POLLIN | POLLHUP)) {
+            ssize_t n = read(pipefd[0], buf + total,
+                             sizeof(buf) - (size_t)total - 1);
+            if (n > 0) {
+                total += n;
+                continue;
+            }
+            if (n == 0) {
+                break;
+            }
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            }
             break;
         }
     }
@@ -85,7 +165,9 @@ bool nabtoshell_tmux_list_sessions(struct nabtoshell_tmux_list* list)
     buf[total] = '\0';
 
     int status;
-    waitpid(pid, &status, 0);
+    if (!waitpid_timeout(pid, NABTOSHELL_TMUX_TIMEOUT_MS, &status)) {
+        return true;
+    }
 
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         /* tmux not running or error: return empty list */
@@ -159,7 +241,7 @@ bool nabtoshell_tmux_session_exists(const char* name)
 
     if (pid == 0) {
         /* Redirect all output to /dev/null */
-        int devnull = open("/dev/null", 0x0002); /* O_RDWR */
+        int devnull = open("/dev/null", O_RDWR);
         if (devnull >= 0) {
             dup2(devnull, STDOUT_FILENO);
             dup2(devnull, STDERR_FILENO);
@@ -170,7 +252,9 @@ bool nabtoshell_tmux_session_exists(const char* name)
     }
 
     int status;
-    waitpid(pid, &status, 0);
+    if (!waitpid_timeout(pid, NABTOSHELL_TMUX_TIMEOUT_MS, &status)) {
+        return false;
+    }
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
@@ -192,7 +276,7 @@ bool nabtoshell_tmux_create_session(const char* name, uint16_t cols,
 
     if (pid == 0) {
         /* Redirect output to /dev/null */
-        int devnull = open("/dev/null", 0x0002);
+        int devnull = open("/dev/null", O_RDWR);
         if (devnull >= 0) {
             dup2(devnull, STDOUT_FILENO);
             dup2(devnull, STDERR_FILENO);
@@ -211,6 +295,8 @@ bool nabtoshell_tmux_create_session(const char* name, uint16_t cols,
     }
 
     int status;
-    waitpid(pid, &status, 0);
+    if (!waitpid_timeout(pid, NABTOSHELL_TMUX_TIMEOUT_MS, &status)) {
+        return false;
+    }
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }

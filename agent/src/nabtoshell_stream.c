@@ -25,16 +25,21 @@ static void stream_callback(NabtoDeviceFuture* future, NabtoDeviceError ec,
                             void* userData);
 static void stream_accepted(NabtoDeviceFuture* future, NabtoDeviceError ec,
                             void* userData);
-static void start_stream_read(struct nabtoshell_active_stream* as);
-static void stream_has_read(NabtoDeviceFuture* future, NabtoDeviceError ec,
-                            void* userData);
-static void stream_wrote(NabtoDeviceFuture* future, NabtoDeviceError ec,
-                         void* userData);
 static void start_stream_close(struct nabtoshell_active_stream* as);
 static void stream_closed(NabtoDeviceFuture* future, NabtoDeviceError ec,
                           void* userData);
 static void cleanup_active_stream(struct nabtoshell_active_stream* as);
+static void* stream_setup_thread(void* arg);
 static void* pty_reader_thread(void* arg);
+static void* stream_reader_thread(void* arg);
+
+static void start_stream_close_once(struct nabtoshell_active_stream* as)
+{
+    bool expected = false;
+    if (atomic_compare_exchange_strong(&as->closeStarted, &expected, true)) {
+        start_stream_close(as);
+    }
+}
 
 void nabtoshell_stream_listener_init(struct nabtoshell_stream_listener* sl,
                                      NabtoDevice* device,
@@ -67,6 +72,13 @@ void nabtoshell_stream_listener_stop(struct nabtoshell_stream_listener* sl)
     struct nabtoshell_active_stream* as = sl->activeStreams;
     while (as != NULL) {
         atomic_store(&as->closing, true);
+        if (as->ptyFd >= 0) {
+            close(as->ptyFd);
+            as->ptyFd = -1;
+        }
+        if (as->childPid > 0) {
+            kill(as->childPid, SIGTERM);
+        }
         as = as->next;
     }
 }
@@ -82,11 +94,27 @@ void nabtoshell_stream_listener_deinit(struct nabtoshell_stream_listener* sl)
             close(as->ptyFd);
             as->ptyFd = -1;
         }
-        if (as->threadStarted) {
-            pthread_join(as->ptyReaderThread, NULL);
+        if (as->childPid > 0) {
+            kill(as->childPid, SIGTERM);
+        }
+        if (as->setupThreadStarted) {
+            if (!pthread_equal(as->setupThread, pthread_self())) {
+                pthread_join(as->setupThread, NULL);
+            }
+        }
+        if (as->ptyReaderThreadStarted) {
+            if (!pthread_equal(as->ptyReaderThread, pthread_self())) {
+                pthread_join(as->ptyReaderThread, NULL);
+            }
+        }
+        if (as->streamReaderThreadStarted) {
+            if (!pthread_equal(as->streamReaderThread, pthread_self())) {
+                pthread_join(as->streamReaderThread, NULL);
+            }
         }
         if (as->childPid > 0) {
-            waitpid(as->childPid, NULL, WNOHANG);
+            waitpid(as->childPid, NULL, 0);
+            as->childPid = -1;
         }
         if (as->stream != NULL) {
             nabto_device_stream_free(as->stream);
@@ -153,6 +181,7 @@ static void stream_callback(NabtoDeviceFuture* future, NabtoDeviceError ec,
     as->ptyFd = -1;
     as->childPid = -1;
     atomic_init(&as->closing, false);
+    atomic_init(&as->closeStarted, false);
 
     /* Add to linked list */
     as->next = sl->activeStreams;
@@ -183,7 +212,7 @@ static void stream_accepted(NabtoDeviceFuture* future, NabtoDeviceError ec,
     NabtoDeviceConnectionRef ref =
         nabto_device_stream_get_connection_ref(as->stream);
     if (!nabtoshell_iam_check_access_ref(&as->app->iam, ref, "Terminal:Connect")) {
-        start_stream_close(as);
+        start_stream_close_once(as);
         return;
     }
 
@@ -192,90 +221,108 @@ static void stream_accepted(NabtoDeviceFuture* future, NabtoDeviceError ec,
         nabtoshell_session_find(&as->app->sessionMap, ref);
     if (entry == NULL) {
         printf("No session target set for connection, closing stream" NEWLINE);
-        start_stream_close(as);
+        start_stream_close_once(as);
         return;
     }
 
-    /* Set up initial window size */
+    /* Copy session target and do setup off the SDK callback thread. */
+    strncpy(as->sessionName, entry->sessionName, sizeof(as->sessionName) - 1);
+    as->sessionName[sizeof(as->sessionName) - 1] = '\0';
+    as->sessionCols = entry->cols;
+    as->sessionRows = entry->rows;
+
+    if (pthread_create(&as->setupThread, NULL, stream_setup_thread, as) != 0) {
+        printf("Failed to create stream setup thread" NEWLINE);
+        start_stream_close_once(as);
+        return;
+    }
+    as->setupThreadStarted = true;
+}
+
+static void* stream_setup_thread(void* arg)
+{
+    struct nabtoshell_active_stream* as = arg;
+
+    if (atomic_load(&as->closing)) {
+        return NULL;
+    }
+
     struct winsize ws;
-    ws.ws_col = entry->cols;
-    ws.ws_row = entry->rows;
+    ws.ws_col = as->sessionCols;
+    ws.ws_row = as->sessionRows;
     ws.ws_xpixel = 0;
     ws.ws_ypixel = 0;
 
-    /* forkpty to spawn tmux attach */
+    /* Spawn tmux attach in a PTY. */
     pid_t pid = forkpty(&as->ptyFd, NULL, NULL, &ws);
     if (pid < 0) {
         printf("forkpty failed: %s" NEWLINE, strerror(errno));
-        start_stream_close(as);
-        return;
+        start_stream_close_once(as);
+        return NULL;
     }
 
     if (pid == 0) {
-        /* Child process: exec tmux attach */
-        execlp("tmux", "tmux", "attach-session", "-t", entry->sessionName,
-               (char*)NULL);
+        execlp("tmux", "tmux", "attach-session", "-t", as->sessionName, (char*)NULL);
         _exit(1);
     }
 
-    /* Parent process */
     as->childPid = pid;
 
-    /* Start the PTY reader thread */
     if (pthread_create(&as->ptyReaderThread, NULL, pty_reader_thread, as) != 0) {
-        printf("Failed to create PTY reader thread" NEWLINE);
+        printf("Failed to create PTY->stream thread" NEWLINE);
+        kill(pid, SIGTERM);
         close(as->ptyFd);
         as->ptyFd = -1;
-        kill(pid, SIGTERM);
-        waitpid(pid, NULL, 0);
-        start_stream_close(as);
-        return;
+        start_stream_close_once(as);
+        return NULL;
     }
-    as->threadStarted = true;
+    as->ptyReaderThreadStarted = true;
 
-    /* Start reading from the Nabto stream (client -> PTY) */
-    start_stream_read(as);
-}
-
-static void start_stream_read(struct nabtoshell_active_stream* as)
-{
-    if (atomic_load(&as->closing)) {
-        return;
-    }
-
-    NabtoDeviceFuture* readFuture = nabto_device_future_new(as->device);
-    nabto_device_stream_read_some(as->stream, readFuture, as->readBuffer,
-                                  NABTOSHELL_STREAM_BUFFER_SIZE, &as->readLength);
-    nabto_device_future_set_callback(readFuture, stream_has_read, as);
-}
-
-static void stream_has_read(NabtoDeviceFuture* future, NabtoDeviceError ec,
-                            void* userData)
-{
-    nabto_device_future_free(future);
-    struct nabtoshell_active_stream* as = userData;
-
-    if (ec == NABTO_DEVICE_EC_EOF || ec != NABTO_DEVICE_EC_OK) {
+    if (pthread_create(&as->streamReaderThread, NULL, stream_reader_thread, as) != 0) {
+        printf("Failed to create stream->PTY thread" NEWLINE);
         atomic_store(&as->closing, true);
-        if (as->ptyFd >= 0) {
-            close(as->ptyFd);
-            as->ptyFd = -1;
-        }
-        start_stream_close(as);
-        return;
+        close(as->ptyFd);
+        as->ptyFd = -1;
+        start_stream_close_once(as);
+        return NULL;
     }
+    as->streamReaderThreadStarted = true;
 
-    /* Write data from stream to PTY */
-    if (as->ptyFd >= 0 && as->readLength > 0) {
-        ssize_t written = write(as->ptyFd, as->readBuffer, as->readLength);
-        (void)written;
-    }
-
-    start_stream_read(as);
+    return NULL;
 }
 
-/* PTY reader thread: reads from PTY fd and writes to Nabto stream.
-   Uses blocking I/O on both sides. */
+/* Stream reader thread: reads from Nabto stream and writes to PTY. */
+static void* stream_reader_thread(void* arg)
+{
+    struct nabtoshell_active_stream* as = arg;
+    uint8_t buf[NABTOSHELL_STREAM_BUFFER_SIZE];
+    size_t readLength = 0;
+
+    while (!atomic_load(&as->closing)) {
+        NabtoDeviceFuture* readFuture = nabto_device_future_new(as->device);
+        if (readFuture == NULL) {
+            break;
+        }
+        nabto_device_stream_read_some(as->stream, readFuture, buf, sizeof(buf), &readLength);
+        NabtoDeviceError ec = nabto_device_future_wait(readFuture);
+        nabto_device_future_free(readFuture);
+
+        if (ec != NABTO_DEVICE_EC_OK) {
+            break;
+        }
+
+        if (readLength > 0 && as->ptyFd >= 0) {
+            ssize_t written = write(as->ptyFd, buf, readLength);
+            (void)written;
+        }
+    }
+
+    atomic_store(&as->closing, true);
+    start_stream_close_once(as);
+    return NULL;
+}
+
+/* PTY reader thread: reads from PTY and writes to Nabto stream. */
 static void* pty_reader_thread(void* arg)
 {
     struct nabtoshell_active_stream* as = arg;
@@ -298,15 +345,8 @@ static void* pty_reader_thread(void* arg)
         }
     }
 
-    /* Signal that we are done */
     atomic_store(&as->closing, true);
-
-    /* Close the stream from the PTY reader side */
-    NabtoDeviceFuture* closeFuture = nabto_device_future_new(as->device);
-    nabto_device_stream_close(as->stream, closeFuture);
-    nabto_device_future_wait(closeFuture);
-    nabto_device_future_free(closeFuture);
-
+    start_stream_close_once(as);
     return NULL;
 }
 
@@ -326,6 +366,46 @@ static void stream_closed(NabtoDeviceFuture* future, NabtoDeviceError ec,
     cleanup_active_stream(as);
 }
 
+/*
+ * Blocking cleanup that runs on a detached thread.
+ * Waits for the PTY reader thread to exit and reaps the child process,
+ * then frees all resources. This MUST NOT run on the SDK event loop
+ * thread because pthread_join can deadlock if the PTY reader thread is
+ * itself blocked inside nabto_device_future_wait.
+ */
+static void* cleanup_thread_func(void* arg)
+{
+    struct nabtoshell_active_stream* as = arg;
+
+    if (as->setupThreadStarted) {
+        pthread_join(as->setupThread, NULL);
+        as->setupThreadStarted = false;
+    }
+
+    if (as->ptyReaderThreadStarted) {
+        pthread_join(as->ptyReaderThread, NULL);
+        as->ptyReaderThreadStarted = false;
+    }
+
+    if (as->streamReaderThreadStarted) {
+        pthread_join(as->streamReaderThread, NULL);
+        as->streamReaderThreadStarted = false;
+    }
+
+    if (as->childPid > 0) {
+        int status;
+        waitpid(as->childPid, &status, 0);
+        as->childPid = -1;
+    }
+
+    if (as->stream != NULL) {
+        nabto_device_stream_free(as->stream);
+        as->stream = NULL;
+    }
+    free(as);
+    return NULL;
+}
+
 static void cleanup_active_stream(struct nabtoshell_active_stream* as)
 {
     atomic_store(&as->closing, true);
@@ -335,15 +415,8 @@ static void cleanup_active_stream(struct nabtoshell_active_stream* as)
         as->ptyFd = -1;
     }
 
-    if (as->threadStarted) {
-        pthread_join(as->ptyReaderThread, NULL);
-        as->threadStarted = false;
-    }
-
     if (as->childPid > 0) {
-        int status;
-        waitpid(as->childPid, &status, WNOHANG);
-        as->childPid = -1;
+        kill(as->childPid, SIGTERM);
     }
 
     /* Remove from session map */
@@ -366,9 +439,16 @@ static void cleanup_active_stream(struct nabtoshell_active_stream* as)
         }
     }
 
-    if (as->stream != NULL) {
-        nabto_device_stream_free(as->stream);
-        as->stream = NULL;
+    /*
+     * Defer blocking operations (pthread_join, waitpid) and final free
+     * to a detached thread so we never block the SDK event loop here.
+     */
+    pthread_t cleanupThread;
+    if (pthread_create(&cleanupThread, NULL, cleanup_thread_func, as) == 0) {
+        pthread_detach(cleanupThread);
+    } else {
+        /* Fallback: if we cannot spawn a thread, do it inline.
+         * This risks blocking but is better than leaking. */
+        cleanup_thread_func(as);
     }
-    free(as);
 }

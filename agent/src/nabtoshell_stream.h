@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <sys/types.h>
+#include "nabtoshell_session.h"
 
 #define NABTOSHELL_STREAM_BUFFER_SIZE 4096
 #define NABTOSHELL_MAX_ACTIVE_STREAMS 8
@@ -20,11 +21,18 @@ struct nabtoshell_active_stream {
     int ptyFd;
     pid_t childPid;
     atomic_bool closing;
-    pthread_t ptyReaderThread;
-    bool threadStarted;
+    atomic_bool closeStarted;
 
-    uint8_t readBuffer[NABTOSHELL_STREAM_BUFFER_SIZE];
-    size_t readLength;
+    char sessionName[NABTOSHELL_SESSION_NAME_MAX];
+    uint16_t sessionCols;
+    uint16_t sessionRows;
+
+    pthread_t setupThread;
+    bool setupThreadStarted;
+    pthread_t ptyReaderThread;
+    bool ptyReaderThreadStarted;
+    pthread_t streamReaderThread;
+    bool streamReaderThreadStarted;
 
     struct nabtoshell_active_stream* next;
 };

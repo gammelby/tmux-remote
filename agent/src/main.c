@@ -15,6 +15,7 @@
 #include <modules/fs/posix/nm_fs_posix.h>
 
 #include <signal.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,8 +40,21 @@ enum {
     OPTION_DEVICE_ID
 };
 
-static int signalCount = 0;
+static volatile sig_atomic_t signalCount = 0;
 static NabtoDevice* globalDevice = NULL;
+
+struct device_event_state {
+    NabtoDevice* device;
+    NabtoDeviceListener* listener;
+    NabtoDeviceFuture* future;
+    NabtoDeviceEvent event;
+    atomic_bool active;
+};
+
+struct device_close_state {
+    NabtoDeviceError ec;
+    atomic_bool done;
+};
 
 struct args {
     bool showHelp;
@@ -60,6 +74,11 @@ static void args_init(struct args* args);
 static void args_deinit(struct args* args);
 static bool parse_args(int argc, char** argv, struct args* args);
 static void signal_handler(int s);
+static void start_wait_for_device_event(struct device_event_state* state);
+static void device_event_callback(NabtoDeviceFuture* future, NabtoDeviceError ec,
+                                  void* userData);
+static void device_close_callback(NabtoDeviceFuture* future, NabtoDeviceError ec,
+                                  void* userData);
 static bool make_directory(const char* directory);
 static bool make_directories(const char* homeDir);
 static char* get_default_home_dir(void);
@@ -259,40 +278,28 @@ bool run_agent(const struct args* args)
     free(pairingString);
     nabto_device_string_free(deviceFingerprint);
 
-    /* Event loop */
+    /* Device event listener and signal handling.
+       The SIGINT handler only sets flags; all SDK calls happen here. */
     signal(SIGINT, &signal_handler);
-    {
-        NabtoDeviceListener* evListener = nabto_device_listener_new(app.device);
-        NabtoDeviceFuture* evFuture = nabto_device_future_new(app.device);
-        nabto_device_device_events_init_listener(app.device, evListener);
-        NabtoDeviceEvent event = 0;
+    struct device_event_state eventState;
+    memset(&eventState, 0, sizeof(eventState));
+    eventState.device = app.device;
+    eventState.listener = nabto_device_listener_new(app.device);
+    eventState.future = nabto_device_future_new(app.device);
+    atomic_init(&eventState.active, true);
+    nabto_device_device_events_init_listener(app.device, eventState.listener);
+    start_wait_for_device_event(&eventState);
 
-        while (true) {
-            nabto_device_listener_device_event(evListener, evFuture, &event);
-            ec = nabto_device_future_wait(evFuture);
-            if (ec != NABTO_DEVICE_EC_OK) {
-                break;
-            }
-            if (event == NABTO_DEVICE_EVENT_CLOSED) {
-                nabto_device_listener_stop(evListener);
-            } else if (event == NABTO_DEVICE_EVENT_ATTACHED) {
-                printf("Attached to the basestation" NEWLINE);
-            } else if (event == NABTO_DEVICE_EVENT_DETACHED) {
-                printf("Detached from the basestation" NEWLINE);
-            } else if (event == NABTO_DEVICE_EVENT_UNKNOWN_FINGERPRINT) {
-                printf("The device fingerprint is not known by the basestation" NEWLINE);
-            } else if (event == NABTO_DEVICE_EVENT_WRONG_PRODUCT_ID) {
-                printf("The provided Product ID did not match the fingerprint" NEWLINE);
-            } else if (event == NABTO_DEVICE_EVENT_WRONG_DEVICE_ID) {
-                printf("The provided Device ID did not match the fingerprint" NEWLINE);
-            }
-        }
+    while (signalCount == 0 && atomic_load(&eventState.active)) {
+        usleep(100 * 1000);
+    }
 
-        nabto_device_future_free(evFuture);
-        nabto_device_listener_free(evListener);
+    if (signalCount > 0) {
+        printf("\rCaught signal %d" NEWLINE, SIGINT);
     }
 
     /* Shutdown */
+    nabto_device_listener_stop(eventState.listener);
     nabtoshell_coap_handler_stop(&app.coapResize);
     nabtoshell_coap_handler_stop(&app.coapSessions);
     nabtoshell_coap_handler_stop(&app.coapAttach);
@@ -300,14 +307,24 @@ bool run_agent(const struct args* args)
     nabtoshell_coap_handler_stop(&app.coapStatus);
     nabtoshell_stream_listener_stop(&app.streamListener);
 
+    struct device_close_state closeState;
+    closeState.ec = NABTO_DEVICE_EC_OK;
+    atomic_init(&closeState.done, false);
+
     fut = nabto_device_future_new(app.device);
     nabto_device_close(app.device, fut);
-    nabto_device_future_wait(fut);
-    nabto_device_future_free(fut);
+    nabto_device_future_set_callback(fut, device_close_callback, &closeState);
 
-    if (signalCount < 2) {
-        nabto_device_stop(app.device);
+    int closeWaitIterations = 0;
+    while (!atomic_load(&closeState.done) && signalCount < 2 && closeWaitIterations < 50) {
+        usleep(100 * 1000);
+        closeWaitIterations++;
     }
+
+    nabto_device_stop(app.device);
+
+    nabto_device_future_free(eventState.future);
+    nabto_device_listener_free(eventState.listener);
 
     nabtoshell_coap_handler_deinit(&app.coapResize);
     nabtoshell_coap_handler_deinit(&app.coapSessions);
@@ -413,22 +430,60 @@ bool parse_args(int argc, char** argv, struct args* args)
     return true;
 }
 
-void signal_handler(int s)
+static void signal_handler(int s)
 {
-    printf("\rCaught signal %d" NEWLINE, s);
-    if (signalCount == 0) {
+    (void)s;
+    if (signalCount < 2) {
         signalCount++;
-        if (globalDevice != NULL) {
-            NabtoDeviceFuture* fut = nabto_device_future_new(globalDevice);
-            nabto_device_close(globalDevice, fut);
-            nabto_device_future_set_callback(fut, NULL, NULL);
-        }
-    } else if (signalCount == 1) {
-        signalCount++;
-        if (globalDevice != NULL) {
-            nabto_device_stop(globalDevice);
-        }
     }
+}
+
+static void start_wait_for_device_event(struct device_event_state* state)
+{
+    if (!atomic_load(&state->active)) {
+        return;
+    }
+    nabto_device_listener_device_event(state->listener, state->future, &state->event);
+    nabto_device_future_set_callback(state->future, device_event_callback, state);
+}
+
+static void device_event_callback(NabtoDeviceFuture* future, NabtoDeviceError ec,
+                                  void* userData)
+{
+    (void)future;
+    struct device_event_state* state = userData;
+
+    if (ec != NABTO_DEVICE_EC_OK) {
+        atomic_store(&state->active, false);
+        return;
+    }
+
+    if (state->event == NABTO_DEVICE_EVENT_CLOSED) {
+        atomic_store(&state->active, false);
+        nabto_device_listener_stop(state->listener);
+        return;
+    } else if (state->event == NABTO_DEVICE_EVENT_ATTACHED) {
+        printf("Attached to the basestation" NEWLINE);
+    } else if (state->event == NABTO_DEVICE_EVENT_DETACHED) {
+        printf("Detached from the basestation" NEWLINE);
+    } else if (state->event == NABTO_DEVICE_EVENT_UNKNOWN_FINGERPRINT) {
+        printf("The device fingerprint is not known by the basestation" NEWLINE);
+    } else if (state->event == NABTO_DEVICE_EVENT_WRONG_PRODUCT_ID) {
+        printf("The provided Product ID did not match the fingerprint" NEWLINE);
+    } else if (state->event == NABTO_DEVICE_EVENT_WRONG_DEVICE_ID) {
+        printf("The provided Device ID did not match the fingerprint" NEWLINE);
+    }
+
+    start_wait_for_device_event(state);
+}
+
+static void device_close_callback(NabtoDeviceFuture* future, NabtoDeviceError ec,
+                                  void* userData)
+{
+    struct device_close_state* closeState = userData;
+    closeState->ec = ec;
+    atomic_store(&closeState->done, true);
+    nabto_device_future_free(future);
 }
 
 bool make_directory(const char* directory)

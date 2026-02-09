@@ -3,9 +3,12 @@
 
 #include <nabto/nabto_device.h>
 #include <tinycbor/cbor.h>
+#include <pthread.h>
+#include <stdbool.h>
 
 struct nabtoshell;
 struct nabtoshell_coap_handler;
+struct nabtoshell_coap_request_node;
 
 typedef void (*nabtoshell_coap_request_handler)(
     struct nabtoshell_coap_handler* handler,
@@ -18,6 +21,17 @@ struct nabtoshell_coap_handler {
     NabtoDeviceListener* listener;
     NabtoDeviceCoapRequest* request;
     nabtoshell_coap_request_handler requestHandler;
+
+    pthread_t workerThread;
+    bool workerStarted;
+
+    pthread_mutex_t queueMutex;
+    pthread_cond_t queueCond;
+    pthread_cond_t callbackCond;
+    struct nabtoshell_coap_request_node* queueHead;
+    struct nabtoshell_coap_request_node* queueTail;
+    int activeCallbacks;
+    bool stopping;
 };
 
 NabtoDeviceError nabtoshell_coap_handler_init(
