@@ -1,7 +1,9 @@
 import SwiftUI
+import NabtoEdgeClient
 
 struct DeviceListView: View {
     let nabtoService: NabtoService
+    let connectionManager: ConnectionManager
     let bookmarkStore: BookmarkStore
     @State private var showPairing = false
     @State private var deviceStatuses: [String: DeviceStatus] = [:]
@@ -39,7 +41,9 @@ struct DeviceListView: View {
             SessionListView(
                 bookmark: device,
                 nabtoService: nabtoService,
-                bookmarkStore: bookmarkStore
+                connectionManager: connectionManager,
+                bookmarkStore: bookmarkStore,
+                onDismissToDevices: { selectedDevice = nil }
             )
         }
         .task { await probeAllDevices() }
@@ -54,6 +58,7 @@ struct DeviceListView: View {
                 } label: {
                     deviceRow(device)
                 }
+                .accessibilityIdentifier("device-row-\(device.deviceId)")
                 .tint(.primary)
             }
             .onDelete(perform: deleteDevices)
@@ -78,14 +83,17 @@ struct DeviceListView: View {
                     Text(names.isEmpty ? "No sessions" : names)
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .accessibilityIdentifier("device-status-\(device.deviceId)")
                 } else if case .offline = deviceStatuses[device.deviceId] {
                     Text("Offline")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .accessibilityIdentifier("device-status-\(device.deviceId)")
                 } else {
                     Text("Checking...")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .accessibilityIdentifier("device-status-\(device.deviceId)")
                 }
             }
 
@@ -110,11 +118,14 @@ struct DeviceListView: View {
 
     private func deleteDevices(at offsets: IndexSet) {
         for index in offsets {
-            bookmarkStore.removeDevice(id: bookmarkStore.devices[index].deviceId)
+            let deviceId = bookmarkStore.devices[index].deviceId
+            connectionManager.disconnect(deviceId: deviceId)
+            bookmarkStore.removeDevice(id: deviceId)
         }
     }
 
     private func probeAllDevices() async {
+        NSLog("[PROBE] probeAllDevices starting with %d devices", bookmarkStore.devices.count)
         for device in bookmarkStore.devices {
             deviceStatuses[device.deviceId] = .probing
         }
@@ -123,20 +134,31 @@ struct DeviceListView: View {
             for device in bookmarkStore.devices {
                 group.addTask {
                     do {
-                        let service = NabtoService(bookmarkStore: bookmarkStore)
-                        try await service.connect(bookmark: device)
-                        let sessions = try await service.listSessions()
-                        service.disconnect()
+                        NSLog("[PROBE] %@ calling connection(for:)", device.deviceId)
+                        let conn = try await connectionManager.connection(for: device)
+                        NSLog("[PROBE] %@ got connection, creating CoAP request", device.deviceId)
+                        let coap = try conn.createCoapRequest(method: "GET", path: "/terminal/sessions")
+                        NSLog("[PROBE] %@ executing CoAP", device.deviceId)
+                        let response = try await coap.executeAsync()
+                        NSLog("[PROBE] %@ CoAP response status: %d", device.deviceId, response.status)
+                        guard response.status == 205, let payload = response.payload else {
+                            return (device.deviceId, .online([]))
+                        }
+                        let sessions = CBORHelpers.decodeSessions(from: payload)
+                        NSLog("[PROBE] %@ found %d sessions", device.deviceId, sessions.count)
                         return (device.deviceId, .online(sessions))
                     } catch {
+                        NSLog("[PROBE] %@ error: %@", device.deviceId, "\(error)")
                         return (device.deviceId, .offline)
                     }
                 }
             }
 
             for await (deviceId, status) in group {
+                NSLog("[PROBE] setting status for %@", deviceId)
                 deviceStatuses[deviceId] = status
             }
+            NSLog("[PROBE] all probes complete")
         }
     }
 }

@@ -3,7 +3,9 @@ import SwiftUI
 struct SessionListView: View {
     let bookmark: DeviceBookmark
     let nabtoService: NabtoService
+    let connectionManager: ConnectionManager
     let bookmarkStore: BookmarkStore
+    let onDismissToDevices: () -> Void
 
     @State private var sessions: [SessionInfo] = []
     @State private var isLoading = true
@@ -16,6 +18,7 @@ struct SessionListView: View {
         Group {
             if isLoading {
                 ProgressView("Loading sessions...")
+                    .accessibilityIdentifier("sessions-loading")
             } else if let errorMessage {
                 VStack(spacing: 16) {
                     Image(systemName: "wifi.slash")
@@ -24,6 +27,7 @@ struct SessionListView: View {
                     Text(errorMessage)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("sessions-error")
                     Button("Retry") {
                         Task { await loadSessions() }
                     }
@@ -38,6 +42,7 @@ struct SessionListView: View {
                     Text("No tmux sessions running on this device.")
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("sessions-empty")
                 }
                 .padding()
             } else {
@@ -59,7 +64,9 @@ struct SessionListView: View {
                 bookmark: bookmark,
                 sessionName: session,
                 nabtoService: nabtoService,
-                bookmarkStore: bookmarkStore
+                connectionManager: connectionManager,
+                bookmarkStore: bookmarkStore,
+                onDismiss: { onDismissToDevices() }
             )
         }
         .alert("New Session", isPresented: $showNewSessionAlert) {
@@ -107,6 +114,7 @@ struct SessionListView: View {
                 }
                 .padding(.vertical, 4)
             }
+            .accessibilityIdentifier("session-row-\(session.name)")
             .tint(.primary)
         }
     }
@@ -116,10 +124,7 @@ struct SessionListView: View {
         errorMessage = nil
 
         do {
-            if nabtoService.connectionState != .connected {
-                try await nabtoService.connect(bookmark: bookmark)
-            }
-            sessions = try await nabtoService.listSessions()
+            sessions = try await nabtoService.listSessions(bookmark: bookmark)
             isLoading = false
         } catch {
             errorMessage = "Device unreachable. Check that the agent is running."
@@ -130,7 +135,6 @@ struct SessionListView: View {
     private func loadAndAutoAttach() async {
         await loadSessions()
 
-        // Auto-attach if single session
         if sessions.count == 1, errorMessage == nil {
             selectedSession = sessions[0].name
         }
@@ -138,10 +142,7 @@ struct SessionListView: View {
 
     private func createAndAttach(name: String) async {
         do {
-            if nabtoService.connectionState != .connected {
-                try await nabtoService.connect(bookmark: bookmark)
-            }
-            try await nabtoService.createSession(name: name, cols: 80, rows: 24)
+            try await nabtoService.createSession(bookmark: bookmark, name: name, cols: 80, rows: 24)
             selectedSession = name
         } catch {
             errorMessage = error.localizedDescription
