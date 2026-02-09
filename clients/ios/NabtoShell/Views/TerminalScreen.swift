@@ -14,6 +14,7 @@ struct TerminalScreen: View {
     @State private var showError = false
     @State private var isTerminalReady = false
     @State private var initialConnectionDone = false
+    @State private var isConnecting = false
     @State private var isReconnecting = false
     @State private var isDismissing = false
     @Environment(\.scenePhase) private var scenePhase
@@ -31,6 +32,7 @@ struct TerminalScreen: View {
                 onSizeChanged: { cols, rows in
                     currentCols = cols
                     currentRows = rows
+                    guard initialConnectionDone else { return }
                     Task {
                         await nabtoService.resize(bookmark: bookmark, cols: cols, rows: rows)
                     }
@@ -80,9 +82,11 @@ struct TerminalScreen: View {
         }
         .navigationBarHidden(true)
         .task(id: isTerminalReady) {
-            guard isTerminalReady else { return }
+            guard isTerminalReady, !isConnecting, !initialConnectionDone else { return }
+            isConnecting = true
             await connectAndAttach()
             initialConnectionDone = true
+            isConnecting = false
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active && initialConnectionDone {
