@@ -12,9 +12,8 @@ target 'NabtoShell' do
     inherit! :search_paths
   end
 
-  target 'NabtoShellUITests' do
-    inherit! :search_paths
-  end
+  # NabtoShellUITests removed: UI tests drive the app via XCUIApplication
+  # and need zero framework access
 end
 
 post_install do |installer|
