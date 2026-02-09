@@ -30,29 +30,17 @@ enum NabtoError: Error, LocalizedError {
     }
 }
 
-/// Receives connection lifecycle events from the Nabto SDK.
-private class EventReceiver: NSObject, ConnectionEventReceiver {
-    var onClosed: (() -> Void)?
-
-    func onEvent(event: NabtoEdgeClientConnectionEvent) {
-        if event == .CLOSED {
-            onClosed?()
-        }
-    }
-}
-
 @Observable
 class NabtoService {
-    private(set) var connectionState: ConnectionState = .disconnected
     private(set) var currentDeviceId: String?
     private(set) var currentSession: String?
 
-    private var client: Client?
-    private var connection: Connection?
+    private let connectionManager: ConnectionManager
+    private let bookmarkStore: BookmarkStore
+
     private var stream: NabtoEdgeClient.Stream?
     private var readTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
-    private var eventReceiver: EventReceiver?
 
     /// Called on main actor when stream data arrives. Set by TerminalScreen.
     var onStreamData: (([UInt8]) -> Void)?
@@ -60,68 +48,24 @@ class NabtoService {
     /// Called on main actor when the stream ends unexpectedly.
     var onStreamClosed: (() -> Void)?
 
-    private let bookmarkStore: BookmarkStore
-
     private let reconnectLogic = ReconnectLogic()
 
-    init(bookmarkStore: BookmarkStore) {
+    init(connectionManager: ConnectionManager, bookmarkStore: BookmarkStore) {
+        self.connectionManager = connectionManager
         self.bookmarkStore = bookmarkStore
     }
 
-    deinit {
-        disconnect()
-    }
-
-    // MARK: - Private Key
-
-    private func loadOrCreatePrivateKey() throws -> String {
-        if let existing = KeychainService.loadPrivateKey() {
-            return existing
-        }
-        guard let client = client else {
-            throw NabtoError.connectionFailed("Client not initialized")
-        }
-        let key = try client.createPrivateKey()
-        guard KeychainService.savePrivateKey(key) else {
-            throw NabtoError.connectionFailed("Failed to save private key to Keychain")
-        }
-        return key
+    /// Connection state for the current device, derived from ConnectionManager.
+    var connectionState: ConnectionState {
+        guard let deviceId = currentDeviceId else { return .disconnected }
+        return connectionManager.deviceStates[deviceId] ?? .disconnected
     }
 
     // MARK: - Connection
 
     func connect(bookmark: DeviceBookmark) async throws {
-        disconnect()
-
-        connectionState = .connecting
         currentDeviceId = bookmark.deviceId
-
-        let c = Client()
-        self.client = c
-
-        let privateKey = try loadOrCreatePrivateKey()
-
-        let conn = try c.createConnection()
-        self.connection = conn
-
-        try conn.setPrivateKey(key: privateKey)
-        try conn.setProductId(id: bookmark.productId)
-        try conn.setDeviceId(id: bookmark.deviceId)
-        try conn.setServerConnectToken(sct: bookmark.sct)
-
-        try await conn.connectAsync()
-
-        // Listen for connection close events
-        let receiver = EventReceiver()
-        receiver.onClosed = { [weak self] in
-            Task { @MainActor in
-                self?.onStreamClosed?()
-            }
-        }
-        self.eventReceiver = receiver
-        try conn.addConnectionEventsReceiver(cb: receiver)
-
-        connectionState = .connected
+        _ = try await connectionManager.connection(for: bookmark)
     }
 
     func disconnect() {
@@ -135,82 +79,52 @@ class NabtoService {
             self.stream = nil
         }
 
-        if let conn = connection {
-            if let receiver = eventReceiver {
-                conn.removeConnectionEventsReceiver(cb: receiver)
-            }
-            conn.stop()
-            self.connection = nil
+        if let deviceId = currentDeviceId {
+            connectionManager.disconnect(deviceId: deviceId)
         }
 
-        if let c = client {
-            c.stop()
-            self.client = nil
-        }
-
-        eventReceiver = nil
-        connectionState = .disconnected
         currentSession = nil
     }
 
     // MARK: - Pairing
-    // TODO: Replace direct CoAP pairing with NabtoEdgeIamUtil once its xcframework
-    // deployment target is fixed (currently conflicts with CBORCoding on iOS 16+).
 
     func pair(info: PairingInfo) async throws -> DeviceBookmark {
-        disconnect()
+        let conn = try await connectionManager.connectForPairing(info: info)
 
-        let c = Client()
-        self.client = c
+        do {
+            try await conn.passwordAuthenticateAsync(username: info.username, password: info.password)
 
-        let privateKey = try loadOrCreatePrivateKey()
-
-        let conn = try c.createConnection()
-        self.connection = conn
-
-        try conn.setPrivateKey(key: privateKey)
-        try conn.setProductId(id: info.productId)
-        try conn.setDeviceId(id: info.deviceId)
-        try conn.setServerConnectToken(sct: info.sct)
-
-        connectionState = .connecting
-        try await conn.connectAsync()
-
-        try await conn.passwordAuthenticateAsync(username: info.username, password: info.password)
-
-        // Pair via direct CoAP: try password-invite first, fall back to password-open (demo mode)
-        let paired = try await coapPairPasswordInvite(conn: conn, username: info.username)
-        if !paired {
-            let openPaired = try await coapPairPasswordOpen(conn: conn, username: info.username)
-            if !openPaired {
-                throw NabtoError.pairingFailed("The invitation may have already been used.")
+            let paired = try await coapPairPasswordInvite(conn: conn, username: info.username)
+            if !paired {
+                let openPaired = try await coapPairPasswordOpen(conn: conn, username: info.username)
+                if !openPaired {
+                    throw NabtoError.pairingFailed("The invitation may have already been used.")
+                }
             }
+
+            let fingerprint = try conn.getDeviceFingerprintHex()
+
+            let bookmark = DeviceBookmark(
+                productId: info.productId,
+                deviceId: info.deviceId,
+                fingerprint: fingerprint,
+                sct: info.sct,
+                name: info.deviceId,
+                lastSession: nil,
+                lastConnected: Date()
+            )
+
+            connectionManager.adoptConnection(conn, for: info.deviceId)
+            return bookmark
+        } catch {
+            conn.stop()
+            connectionManager.setDeviceState(.disconnected, for: info.deviceId)
+            throw error
         }
-
-        let fingerprint = try conn.getDeviceFingerprintHex()
-
-        let bookmark = DeviceBookmark(
-            productId: info.productId,
-            deviceId: info.deviceId,
-            fingerprint: fingerprint,
-            sct: info.sct,
-            name: info.deviceId,
-            lastSession: nil,
-            lastConnected: Date()
-        )
-
-        // Close the pairing connection
-        try? conn.close()
-        self.connection = nil
-        self.client = nil
-        connectionState = .disconnected
-
-        return bookmark
     }
 
     // MARK: - CoAP: Pairing (temporary, replaces IamUtil)
 
-    /// POST /iam/pairing/password-invite with CBOR {"Username": "<username>"}
     private func coapPairPasswordInvite(conn: Connection, username: String) async throws -> Bool {
         let coap = try conn.createCoapRequest(method: "POST", path: "/iam/pairing/password-invite")
         let cbor: CBOR = .map([.utf8String("Username"): .utf8String(username)])
@@ -220,7 +134,6 @@ class NabtoService {
         return response.status >= 200 && response.status < 300
     }
 
-    /// POST /iam/pairing/password-open with CBOR {"Username": "<username>"}
     private func coapPairPasswordOpen(conn: Connection, username: String) async throws -> Bool {
         let coap = try conn.createCoapRequest(method: "POST", path: "/iam/pairing/password-open")
         let cbor: CBOR = .map([.utf8String("Username"): .utf8String(username)])
@@ -232,10 +145,8 @@ class NabtoService {
 
     // MARK: - CoAP: Sessions
 
-    func listSessions() async throws -> [SessionInfo] {
-        guard let conn = connection else {
-            throw NabtoError.connectionFailed("Not connected")
-        }
+    func listSessions(bookmark: DeviceBookmark) async throws -> [SessionInfo] {
+        let conn = try await connectionManager.connection(for: bookmark)
 
         let coap = try conn.createCoapRequest(method: "GET", path: "/terminal/sessions")
         let response = try await coap.executeAsync()
@@ -248,10 +159,8 @@ class NabtoService {
         return CBORHelpers.decodeSessions(from: payload)
     }
 
-    func attach(session: String, cols: Int, rows: Int) async throws {
-        guard let conn = connection else {
-            throw NabtoError.connectionFailed("Not connected")
-        }
+    func attach(bookmark: DeviceBookmark, session: String, cols: Int, rows: Int) async throws {
+        let conn = try await connectionManager.connection(for: bookmark)
 
         let coap = try conn.createCoapRequest(method: "POST", path: "/terminal/attach")
         let payload = CBORHelpers.encodeAttach(session: session, cols: cols, rows: rows)
@@ -265,13 +174,12 @@ class NabtoService {
             throw NabtoError.coapFailed("Attach", response.status)
         }
 
+        currentDeviceId = bookmark.deviceId
         currentSession = session
     }
 
-    func createSession(name: String, cols: Int, rows: Int, command: String? = nil) async throws {
-        guard let conn = connection else {
-            throw NabtoError.connectionFailed("Not connected")
-        }
+    func createSession(bookmark: DeviceBookmark, name: String, cols: Int, rows: Int, command: String? = nil) async throws {
+        let conn = try await connectionManager.connection(for: bookmark)
 
         let coap = try conn.createCoapRequest(method: "POST", path: "/terminal/create")
         let payload = CBORHelpers.encodeCreate(session: name, cols: cols, rows: rows, command: command)
@@ -283,15 +191,13 @@ class NabtoService {
         }
     }
 
-    func resize(cols: Int, rows: Int) async {
-        guard let conn = connection else { return }
-
+    func resize(bookmark: DeviceBookmark, cols: Int, rows: Int) async {
         do {
+            let conn = try await connectionManager.connection(for: bookmark)
             let coap = try conn.createCoapRequest(method: "POST", path: "/terminal/resize")
             let payload = CBORHelpers.encodeResize(cols: cols, rows: rows)
             try coap.setRequestPayload(contentFormat: ContentFormat.APPLICATION_CBOR.rawValue, data: payload)
             let response = try await coap.executeAsync()
-            // Silent retry on failure (resize is not critical)
             if response.status != 204 {
                 let coap2 = try conn.createCoapRequest(method: "POST", path: "/terminal/resize")
                 try coap2.setRequestPayload(contentFormat: ContentFormat.APPLICATION_CBOR.rawValue, data: payload)
@@ -304,10 +210,8 @@ class NabtoService {
 
     // MARK: - Stream
 
-    func openStream() async throws {
-        guard let conn = connection else {
-            throw NabtoError.connectionFailed("Not connected")
-        }
+    func openStream(bookmark: DeviceBookmark) async throws {
+        let conn = try await connectionManager.connection(for: bookmark)
 
         let s = try conn.createStream()
         try await s.openAsync(streamPort: 1)
@@ -373,25 +277,23 @@ class NabtoService {
             while !Task.isCancelled {
                 attempt += 1
                 await MainActor.run {
-                    self.connectionState = .reconnecting(attempt: attempt)
+                    self.connectionManager.setDeviceState(.reconnecting(attempt: attempt), for: bookmark.deviceId)
                 }
 
                 let elapsed = Date().timeIntervalSince(startTime)
                 if self.reconnectLogic.shouldGiveUp(elapsedTime: elapsed) {
                     await MainActor.run {
-                        self.connectionState = .offline
+                        self.connectionManager.setDeviceState(.offline, for: bookmark.deviceId)
                     }
                     return
                 }
 
                 do {
+                    self.connectionManager.disconnect(deviceId: bookmark.deviceId)
                     try await self.connect(bookmark: bookmark)
-                    try await self.attach(session: session, cols: cols, rows: rows)
-                    try await self.openStream()
-                    await self.resize(cols: cols, rows: rows)
-                    await MainActor.run {
-                        self.connectionState = .connected
-                    }
+                    try await self.attach(bookmark: bookmark, session: session, cols: cols, rows: rows)
+                    try await self.openStream(bookmark: bookmark)
+                    await self.resize(bookmark: bookmark, cols: cols, rows: rows)
                     return
                 } catch {
                     let delay = self.reconnectLogic.backoff(attempt: attempt)
