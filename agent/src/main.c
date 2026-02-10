@@ -19,12 +19,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <time.h>
-#include <pthread.h>
 
 #define NEWLINE "\n"
 
@@ -58,17 +56,6 @@ struct device_close_state {
     atomic_bool done;
 };
 
-struct connection_event_state {
-    NabtoDevice* device;
-    NabtoDeviceListener* listener;
-    NabtoDeviceFuture* future;
-    NabtoDeviceConnectionRef ref;
-    NabtoDeviceConnectionEvent event;
-    atomic_bool active;
-    uint64_t listenSeq;
-    int64_t armedAtMs;
-};
-
 struct args {
     bool showHelp;
     bool showVersion;
@@ -87,15 +74,9 @@ static void args_init(struct args* args);
 static void args_deinit(struct args* args);
 static bool parse_args(int argc, char** argv, struct args* args);
 static void signal_handler(int s);
-static int64_t monotonic_ms(void);
 static void start_wait_for_device_event(struct device_event_state* state);
 static void device_event_callback(NabtoDeviceFuture* future, NabtoDeviceError ec,
                                   void* userData);
-static const char* device_event_to_string(NabtoDeviceEvent event);
-static const char* connection_event_to_string(NabtoDeviceConnectionEvent event);
-static void start_wait_for_connection_event(struct connection_event_state* state);
-static void connection_event_callback(NabtoDeviceFuture* future, NabtoDeviceError ec,
-                                      void* userData);
 static void device_close_callback(NabtoDeviceFuture* future, NabtoDeviceError ec,
                                   void* userData);
 static bool make_directory(const char* directory);
@@ -309,15 +290,6 @@ bool run_agent(const struct args* args)
     nabto_device_device_events_init_listener(app.device, eventState.listener);
     start_wait_for_device_event(&eventState);
 
-    struct connection_event_state connEventState;
-    memset(&connEventState, 0, sizeof(connEventState));
-    connEventState.device = app.device;
-    connEventState.listener = nabto_device_listener_new(app.device);
-    connEventState.future = nabto_device_future_new(app.device);
-    atomic_init(&connEventState.active, true);
-    nabto_device_connection_events_init_listener(app.device, connEventState.listener);
-    start_wait_for_connection_event(&connEventState);
-
     while (signalCount == 0 && atomic_load(&eventState.active)) {
         usleep(100 * 1000);
     }
@@ -328,7 +300,6 @@ bool run_agent(const struct args* args)
 
     /* Shutdown */
     nabto_device_listener_stop(eventState.listener);
-    nabto_device_listener_stop(connEventState.listener);
     nabtoshell_coap_handler_stop(&app.coapResize);
     nabtoshell_coap_handler_stop(&app.coapSessions);
     nabtoshell_coap_handler_stop(&app.coapAttach);
@@ -354,8 +325,6 @@ bool run_agent(const struct args* args)
 
     nabto_device_future_free(eventState.future);
     nabto_device_listener_free(eventState.listener);
-    nabto_device_future_free(connEventState.future);
-    nabto_device_listener_free(connEventState.listener);
 
     nabtoshell_coap_handler_deinit(&app.coapResize);
     nabtoshell_coap_handler_deinit(&app.coapSessions);
@@ -469,87 +438,6 @@ static void signal_handler(int s)
     }
 }
 
-static int64_t monotonic_ms(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ((int64_t)ts.tv_sec * 1000) + (ts.tv_nsec / 1000000);
-}
-
-static unsigned long current_tid(void)
-{
-    return (unsigned long)pthread_self();
-}
-
-static const char* connection_event_to_string(NabtoDeviceConnectionEvent event)
-{
-    if (event == NABTO_DEVICE_CONNECTION_EVENT_OPENED) {
-        return "OPENED";
-    } else if (event == NABTO_DEVICE_CONNECTION_EVENT_CLOSED) {
-        return "CLOSED";
-    } else if (event == NABTO_DEVICE_CONNECTION_EVENT_CHANNEL_CHANGED) {
-        return "CHANNEL_CHANGED";
-    }
-    return "UNKNOWN";
-}
-
-static const char* device_event_to_string(NabtoDeviceEvent event)
-{
-    if (event == NABTO_DEVICE_EVENT_ATTACHED) {
-        return "ATTACHED";
-    } else if (event == NABTO_DEVICE_EVENT_DETACHED) {
-        return "DETACHED";
-    } else if (event == NABTO_DEVICE_EVENT_UNKNOWN_FINGERPRINT) {
-        return "UNKNOWN_FINGERPRINT";
-    } else if (event == NABTO_DEVICE_EVENT_WRONG_PRODUCT_ID) {
-        return "WRONG_PRODUCT_ID";
-    } else if (event == NABTO_DEVICE_EVENT_WRONG_DEVICE_ID) {
-        return "WRONG_DEVICE_ID";
-    } else if (event == NABTO_DEVICE_EVENT_CLOSED) {
-        return "CLOSED";
-    }
-    return "UNKNOWN";
-}
-
-static void start_wait_for_connection_event(struct connection_event_state* state)
-{
-    if (!atomic_load(&state->active)) {
-        return;
-    }
-    state->listenSeq++;
-    state->armedAtMs = monotonic_ms();
-    printf("[CONNEV] arm seq=%llu listener=%p future=%p tid=%lu\n",
-           (unsigned long long)state->listenSeq,
-           (void*)state->listener,
-           (void*)state->future,
-           current_tid());
-    nabto_device_listener_connection_event(state->listener, state->future, &state->ref, &state->event);
-    nabto_device_future_set_callback(state->future, connection_event_callback, state);
-}
-
-static void connection_event_callback(NabtoDeviceFuture* future, NabtoDeviceError ec,
-                                      void* userData)
-{
-    (void)future;
-    struct connection_event_state* state = userData;
-    int64_t ageMs = monotonic_ms() - state->armedAtMs;
-
-    if (ec != NABTO_DEVICE_EC_OK) {
-        printf("[CONNEV] callback seq=%llu ec=%d age=%lldms tid=%lu\n",
-               (unsigned long long)state->listenSeq, (int)ec, (long long)ageMs, current_tid());
-        atomic_store(&state->active, false);
-        return;
-    }
-
-    printf("[CONNEV] callback seq=%llu ec=0 age=%lldms ref=%llu event=%s tid=%lu\n",
-           (unsigned long long)state->listenSeq,
-           (long long)ageMs,
-           (unsigned long long)state->ref,
-           connection_event_to_string(state->event),
-           current_tid());
-    start_wait_for_connection_event(state);
-}
-
 static void start_wait_for_device_event(struct device_event_state* state)
 {
     if (!atomic_load(&state->active)) {
@@ -564,27 +452,15 @@ static void device_event_callback(NabtoDeviceFuture* future, NabtoDeviceError ec
 {
     (void)future;
     struct device_event_state* state = userData;
-    int64_t cbStartMs = monotonic_ms();
-    printf("[DEVEV] callback enter ec=%d tid=%lu\n", (int)ec, current_tid());
 
     if (ec != NABTO_DEVICE_EC_OK) {
         atomic_store(&state->active, false);
-        printf("[DEVEV] callback leave ec=%d dur=%lldms tid=%lu\n",
-               (int)ec,
-               (long long)(monotonic_ms() - cbStartMs),
-               current_tid());
         return;
     }
 
-    printf("[DEVEV] callback event=%s tid=%lu\n",
-           device_event_to_string(state->event),
-           current_tid());
 
     if (state->event == NABTO_DEVICE_EVENT_CLOSED) {
         atomic_store(&state->active, false);
-        printf("[DEVEV] callback leave event=CLOSED dur=%lldms tid=%lu\n",
-               (long long)(monotonic_ms() - cbStartMs),
-               current_tid());
         return;
     } else if (state->event == NABTO_DEVICE_EVENT_ATTACHED) {
         printf("Attached to the basestation" NEWLINE);
@@ -599,10 +475,6 @@ static void device_event_callback(NabtoDeviceFuture* future, NabtoDeviceError ec
     }
 
     start_wait_for_device_event(state);
-    printf("[DEVEV] callback leave event=%s dur=%lldms tid=%lu\n",
-           device_event_to_string(state->event),
-           (long long)(monotonic_ms() - cbStartMs),
-           current_tid());
 }
 
 static void device_close_callback(NabtoDeviceFuture* future, NabtoDeviceError ec,

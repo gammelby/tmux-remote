@@ -22,7 +22,6 @@ struct nabtoshell_coap_handler {
     NabtoDeviceListener* listener;
     NabtoDeviceCoapRequest* request;
     nabtoshell_coap_request_handler requestHandler;
-    char debugName[64];
 
     pthread_t workerThread;
     bool workerStarted;
@@ -32,11 +31,6 @@ struct nabtoshell_coap_handler {
     pthread_cond_t callbackCond;
     struct nabtoshell_coap_request_node* queueHead;
     struct nabtoshell_coap_request_node* queueTail;
-    size_t queuedRequests;
-    uint64_t nextRequestId;
-    uint64_t listenSequence;
-    uint64_t armedListenSequence;
-    int64_t listenArmedAtMs;
     int activeCallbacks;
     bool stopping;
 };

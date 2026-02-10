@@ -86,20 +86,15 @@ bool nabtoshell_tmux_validate_session_name(const char* name)
 
 bool nabtoshell_tmux_list_sessions(struct nabtoshell_tmux_list* list)
 {
-    int64_t startMs = monotonic_ms();
     memset(list, 0, sizeof(struct nabtoshell_tmux_list));
 
     int pipefd[2];
     if (pipe(pipefd) < 0) {
-        printf("[TMUX] ListSessions setup failed: pipe errno=%d (%s)%s",
-               errno, strerror(errno), NEWLINE);
         return false;
     }
 
     pid_t pid = fork();
     if (pid < 0) {
-        printf("[TMUX] ListSessions setup failed: fork errno=%d (%s)%s",
-               errno, strerror(errno), NEWLINE);
         close(pipefd[0]);
         close(pipefd[1]);
         return false;
@@ -125,8 +120,6 @@ bool nabtoshell_tmux_list_sessions(struct nabtoshell_tmux_list* list)
     }
 
     /* Parent: read output */
-    printf("[TMUX] ListSessions exec: %s (pid=%ld)%s",
-           NABTOSHELL_TMUX_LIST_CMDLINE, (long)pid, NEWLINE);
     close(pipefd[1]);
 
     char buf[4096];
@@ -175,24 +168,10 @@ bool nabtoshell_tmux_list_sessions(struct nabtoshell_tmux_list* list)
 
     int status;
     if (!waitpid_timeout(pid, NABTOSHELL_TMUX_TIMEOUT_MS, &status)) {
-        int64_t elapsedMs = monotonic_ms() - startMs;
-        printf("[TMUX] ListSessions done: pid=%ld elapsed=%lldms result=wait-failed outputBytes=%zd%s",
-               (long)pid, (long long)elapsedMs, total, NEWLINE);
         return true;
     }
 
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        int64_t elapsedMs = monotonic_ms() - startMs;
-        if (WIFSIGNALED(status)) {
-            printf("[TMUX] ListSessions done: pid=%ld elapsed=%lldms result=signaled signal=%d outputBytes=%zd%s",
-                   (long)pid, (long long)elapsedMs, WTERMSIG(status), total, NEWLINE);
-        } else if (WIFEXITED(status)) {
-            printf("[TMUX] ListSessions done: pid=%ld elapsed=%lldms result=exit-nonzero exitCode=%d outputBytes=%zd%s",
-                   (long)pid, (long long)elapsedMs, WEXITSTATUS(status), total, NEWLINE);
-        } else {
-            printf("[TMUX] ListSessions done: pid=%ld elapsed=%lldms result=abnormal-status outputBytes=%zd%s",
-                   (long)pid, (long long)elapsedMs, total, NEWLINE);
-        }
         /* tmux not running or error: return empty list */
         return true;
     }
@@ -246,12 +225,6 @@ bool nabtoshell_tmux_list_sessions(struct nabtoshell_tmux_list* list)
 
         list->count++;
         line = next;
-    }
-
-    {
-        int64_t elapsedMs = monotonic_ms() - startMs;
-        printf("[TMUX] ListSessions done: pid=%ld elapsed=%lldms result=ok sessions=%d outputBytes=%zd%s",
-               (long)pid, (long long)elapsedMs, list->count, total, NEWLINE);
     }
 
     return true;
