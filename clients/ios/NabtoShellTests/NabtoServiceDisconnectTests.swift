@@ -61,6 +61,7 @@ final class NabtoServiceDisconnectTests: XCTestCase {
 
         // Start a reconnect attempt. It will fail since there's no real device,
         // but it creates a reconnectTask that loops with backoff.
+        service.enableReconnectContext(deviceId: bookmark.deviceId, session: "test")
         service.attemptReconnect(
             bookmark: bookmark,
             session: "test",
@@ -82,6 +83,7 @@ final class NabtoServiceDisconnectTests: XCTestCase {
         let (service, _, _) = makeService()
         let bookmark = makeBookmark()
 
+        service.enableReconnectContext(deviceId: bookmark.deviceId, session: "test")
         service.attemptReconnect(
             bookmark: bookmark,
             session: "test",
@@ -167,6 +169,7 @@ final class NabtoServiceDisconnectTests: XCTestCase {
         let (service, _, _) = makeService()
         let bookmark = makeBookmark()
 
+        service.enableReconnectContext(deviceId: bookmark.deviceId, session: "test")
         service.attemptReconnect(
             bookmark: bookmark,
             session: "test",
@@ -217,15 +220,49 @@ final class NabtoServiceDisconnectTests: XCTestCase {
         XCTAssertEqual(cm.deviceStates[deviceId], .disconnected)
     }
 
+    func testConnectionManagerCancelPendingConnectClearsState() async {
+        let cm = ConnectionManager()
+        let bookmark = makeBookmark(deviceId: "de-pending-cancel")
+
+        let connectTask = Task {
+            _ = try? await cm.connection(for: bookmark)
+        }
+
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            if cm.deviceStates[bookmark.deviceId] == .connecting {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        cm.cancelPendingConnect(deviceId: bookmark.deviceId)
+
+        XCTAssertEqual(cm.deviceStates[bookmark.deviceId], .disconnected)
+        connectTask.cancel()
+    }
+
     // MARK: - Reconnect task lifecycle
+
+    func testAttemptReconnectWithoutContextDoesNotStartTask() {
+        let (service, _, _) = makeService()
+        let bookmark = makeBookmark()
+
+        service.attemptReconnect(bookmark: bookmark, session: "s1", cols: 80, rows: 24)
+
+        XCTAssertNil(service.reconnectTask,
+                     "attemptReconnect should be ignored when reconnect context is disabled")
+    }
 
     func testAttemptReconnectReplacesExistingTask() {
         let (service, _, _) = makeService()
         let bookmark = makeBookmark()
 
+        service.enableReconnectContext(deviceId: bookmark.deviceId, session: "s1")
         service.attemptReconnect(bookmark: bookmark, session: "s1", cols: 80, rows: 24)
         let firstTask = service.reconnectTask
 
+        service.enableReconnectContext(deviceId: bookmark.deviceId, session: "s2")
         service.attemptReconnect(bookmark: bookmark, session: "s2", cols: 80, rows: 24)
         let secondTask = service.reconnectTask
 
@@ -248,6 +285,7 @@ final class NabtoServiceDisconnectTests: XCTestCase {
         // (no real device) and elapsed time check happens before connecting.
         // We can't easily speed this up, so just verify the task exists and
         // cancel it to avoid test slowness.
+        service.enableReconnectContext(deviceId: bookmark.deviceId, session: "test")
         service.attemptReconnect(
             bookmark: bookmark,
             session: "test",
