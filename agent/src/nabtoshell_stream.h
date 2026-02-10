@@ -15,6 +15,8 @@
 struct nabtoshell;
 
 struct nabtoshell_active_stream {
+    uint64_t debugId;
+    int64_t createdAtMs;
     NabtoDevice* device;
     NabtoDeviceStream* stream;
     struct nabtoshell* app;

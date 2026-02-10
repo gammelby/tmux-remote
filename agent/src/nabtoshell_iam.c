@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
+#include <time.h>
+#include <stdint.h>
 
 #define LOGM "nabtoshell_iam"
 #define NEWLINE "\n"
@@ -19,6 +22,28 @@ static void nabtoshell_iam_state_changed(struct nm_iam* iam, void* userData);
 static bool load_iam_config(struct nabtoshell_iam* niam);
 static void save_iam_state(struct nm_fs* file, const char* filename,
                            struct nm_iam_state* state, struct nn_log* logger);
+static void* save_iam_state_thread(void* data);
+static int64_t monotonic_ms(void);
+static unsigned long current_tid(void);
+
+struct save_iam_state_job {
+    struct nm_fs* file;
+    char* filename;
+    struct nm_iam_state* state;
+    struct nn_log* logger;
+};
+
+static int64_t monotonic_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ((int64_t)ts.tv_sec * 1000) + (ts.tv_nsec / 1000000);
+}
+
+static unsigned long current_tid(void)
+{
+    return (unsigned long)pthread_self();
+}
 
 void nabtoshell_iam_init(struct nabtoshell_iam* niam, NabtoDevice* device,
                          struct nm_fs* file, const char* iamStateFile,
@@ -44,12 +69,63 @@ static void nabtoshell_iam_state_changed(struct nm_iam* iam, void* userData)
 {
     (void)iam;
     struct nabtoshell_iam* niam = userData;
+    int64_t cbStartMs = monotonic_ms();
+    printf("[IAMDBG] cb-enter state_changed tid=%lu\n", current_tid());
+
+    int64_t dumpStartMs = monotonic_ms();
     struct nm_iam_state* state = nm_iam_dump_state(&niam->iam);
+    printf("[IAMDBG] state_dump done ms=%lld tid=%lu\n",
+           (long long)(monotonic_ms() - dumpStartMs),
+           current_tid());
     if (state == NULL || niam->iamStateFile == NULL) {
+        printf("[IAMDBG] cb-leave state_changed dropped state=%p iamStateFile=%p dur=%lldms tid=%lu\n",
+               (void*)state,
+               (void*)niam->iamStateFile,
+               (long long)(monotonic_ms() - cbStartMs),
+               current_tid());
         return;
     }
-    save_iam_state(niam->file, niam->iamStateFile, state, niam->logger);
-    nm_iam_state_free(state);
+
+    struct save_iam_state_job* job =
+        (struct save_iam_state_job*)calloc(1, sizeof(struct save_iam_state_job));
+    if (job == NULL) {
+        printf("[IAMDBG] state save dropped (alloc failed)" NEWLINE);
+        nm_iam_state_free(state);
+        printf("[IAMDBG] cb-leave state_changed alloc-failed dur=%lldms tid=%lu\n",
+               (long long)(monotonic_ms() - cbStartMs),
+               current_tid());
+        return;
+    }
+    job->file = niam->file;
+    job->filename = strdup(niam->iamStateFile);
+    job->state = state;
+    job->logger = niam->logger;
+    if (job->filename == NULL) {
+        printf("[IAMDBG] state save dropped (filename alloc failed)" NEWLINE);
+        nm_iam_state_free(state);
+        free(job);
+        printf("[IAMDBG] cb-leave state_changed filename-alloc-failed dur=%lldms tid=%lu\n",
+               (long long)(monotonic_ms() - cbStartMs),
+               current_tid());
+        return;
+    }
+
+    pthread_t t;
+    if (pthread_create(&t, NULL, save_iam_state_thread, job) == 0) {
+        pthread_detach(t);
+        printf("[IAMDBG] cb-leave state_changed queued workerTid=%lu dur=%lldms tid=%lu\n",
+               (unsigned long)t,
+               (long long)(monotonic_ms() - cbStartMs),
+               current_tid());
+    } else {
+        printf("[IAMDBG] state save dropped (thread create failed)" NEWLINE);
+        nm_iam_state_free(state);
+        free(job->filename);
+        free(job);
+        printf("[IAMDBG] cb-leave state_changed thread-create-failed dur=%lldms tid=%lu\n",
+               (long long)(monotonic_ms() - cbStartMs),
+               current_tid());
+    }
 }
 
 static void save_iam_state(struct nm_fs* file, const char* filename,
@@ -65,6 +141,23 @@ static void save_iam_state(struct nm_fs* file, const char* filename,
         }
     }
     nm_iam_serializer_string_free(str);
+}
+
+static void* save_iam_state_thread(void* data)
+{
+    struct save_iam_state_job* job = (struct save_iam_state_job*)data;
+    int64_t startMs = monotonic_ms();
+    printf("[IAMDBG] thread-enter state_save tid=%lu file=%s\n",
+           current_tid(),
+           (job->filename != NULL ? job->filename : "(null)"));
+    save_iam_state(job->file, job->filename, job->state, job->logger);
+    nm_iam_state_free(job->state);
+    free(job->filename);
+    free(job);
+    printf("[IAMDBG] thread-leave state_save dur=%lldms tid=%lu\n",
+           (long long)(monotonic_ms() - startMs),
+           current_tid());
+    return NULL;
 }
 
 void nabtoshell_iam_create_default_state(NabtoDevice* device, struct nm_fs* file,
