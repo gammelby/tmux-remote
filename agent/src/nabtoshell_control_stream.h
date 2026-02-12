@@ -53,6 +53,12 @@ void nabtoshell_control_stream_listener_init(
 void nabtoshell_control_stream_listener_stop(
     struct nabtoshell_control_stream_listener* csl);
 
+/* Join the monitor thread only. Must be called before destroying
+ * resources the monitor accesses (e.g. stream listener mutex).
+ * Safe to call even if monitor was never started. */
+void nabtoshell_control_stream_listener_join_monitor(
+    struct nabtoshell_control_stream_listener* csl);
+
 void nabtoshell_control_stream_listener_deinit(
     struct nabtoshell_control_stream_listener* csl);
 

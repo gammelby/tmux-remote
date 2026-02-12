@@ -30,6 +30,7 @@ void nabtoshell_pattern_matcher_load(nabtoshell_pattern_matcher *m,
     if (count <= 0) return;
 
     m->patterns = calloc(count, sizeof(nabtoshell_compiled_pattern));
+    if (!m->patterns) return;
 
     int compiled = 0;
     for (int i = 0; i < count; i++) {
@@ -60,6 +61,7 @@ void nabtoshell_pattern_matcher_load(nabtoshell_pattern_matcher *m,
 static char *strdup_range(const char *s, size_t start, size_t len)
 {
     char *r = malloc(len + 1);
+    if (!r) return NULL;
     memcpy(r, s + start, len);
     r[len] = '\0';
     return r;
@@ -83,6 +85,7 @@ static char *apply_template(const char *tmpl, const char *number)
 
     size_t result_len = tmpl_len + count * (num_len - ph_len);
     char *result = malloc(result_len + 1);
+    if (!result) return NULL;
     char *dst = result;
     p = tmpl;
     while (*p) {
@@ -113,7 +116,8 @@ static const char *strip_indicator(const char *line)
     }
 
     // Check for U+276F (heavy right-pointing angle): UTF-8 = 0xE2 0x9D 0xAF
-    if ((uint8_t)line[0] == 0xE2 && (uint8_t)line[1] == 0x9D && (uint8_t)line[2] == 0xAF) {
+    if ((uint8_t)line[0] == 0xE2 && line[1] != '\0' && (uint8_t)line[1] == 0x9D &&
+        line[2] != '\0' && (uint8_t)line[2] == 0xAF) {
         line += 3;
         while (*line == ' ') line++;
         return line;
@@ -133,6 +137,7 @@ static void extract_menu_items(const nabtoshell_pattern_matcher *m,
     // Extract prompt: find text before first numbered item in matched_text
     // Process line by line
     char *matched_copy = strdup_range(matched_text, 0, matched_len);
+    if (!matched_copy) return;
     char *prompt = NULL;
 
     char *saveptr;
@@ -203,13 +208,18 @@ static void extract_menu_items(const nabtoshell_pattern_matcher *m,
         size_t label_start = ovector[4];
         size_t label_end = ovector[5];
         char *label = strdup_range(text, label_start, label_end - label_start);
+        char *keys = apply_template(tmpl->keys, num_buf);
+        if (!label || !keys) {
+            free(label);
+            free(keys);
+            break;
+        }
+
         // Trim trailing whitespace
         size_t llen = strlen(label);
         while (llen > 0 && (label[llen-1] == ' ' || label[llen-1] == '\n' || label[llen-1] == '\r' || label[llen-1] == '\t')) {
             label[--llen] = '\0';
         }
-
-        char *keys = apply_template(tmpl->keys, num_buf);
 
         out->actions[out->action_count].label = label;
         out->actions[out->action_count].keys = keys;
@@ -242,6 +252,10 @@ nabtoshell_pattern_match *nabtoshell_pattern_matcher_match(
         size_t match_end = ovector[1];
 
         nabtoshell_pattern_match *match = calloc(1, sizeof(*match));
+        if (!match) {
+            pcre2_match_data_free(md);
+            return NULL;
+        }
         match->id = strdup(m->patterns[i].def->id);
         match->pattern_type = m->patterns[i].def->type;
         match->matched_text = strdup_range(text, match_start, match_end - match_start);
@@ -297,4 +311,26 @@ void nabtoshell_pattern_match_free(nabtoshell_pattern_match *match)
         free(match->actions[i].keys);
     }
     free(match);
+}
+
+nabtoshell_pattern_match *nabtoshell_pattern_match_copy(const nabtoshell_pattern_match *src)
+{
+    if (!src) return NULL;
+
+    nabtoshell_pattern_match *dst = calloc(1, sizeof(*dst));
+    if (!dst) return NULL;
+
+    dst->id = src->id ? strdup(src->id) : NULL;
+    dst->pattern_type = src->pattern_type;
+    dst->prompt = src->prompt ? strdup(src->prompt) : NULL;
+    dst->matched_text = src->matched_text ? strdup(src->matched_text) : NULL;
+    dst->match_position = src->match_position;
+    dst->action_count = src->action_count;
+
+    for (int i = 0; i < src->action_count; i++) {
+        dst->actions[i].label = src->actions[i].label ? strdup(src->actions[i].label) : NULL;
+        dst->actions[i].keys = src->actions[i].keys ? strdup(src->actions[i].keys) : NULL;
+    }
+
+    return dst;
 }

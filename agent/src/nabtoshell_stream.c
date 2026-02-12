@@ -143,6 +143,11 @@ void nabtoshell_stream_listener_deinit(struct nabtoshell_stream_listener* sl)
     pthread_mutex_destroy(&sl->activeStreamsMutex);
 }
 
+/* Returns a copy of the active pattern match for the data stream belonging
+ * to the given connection ref.  The protocol guarantees at most one active
+ * data stream per connection (attach + open on port 1), so the first
+ * non-closing match is authoritative.  If this invariant is ever violated,
+ * we still return the first match found. */
 nabtoshell_pattern_match* nabtoshell_stream_copy_active_match_for_ref(
     struct nabtoshell_stream_listener* sl,
     NabtoDeviceConnectionRef ref)

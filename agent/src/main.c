@@ -338,6 +338,11 @@ bool run_agent(const struct args* args)
     nabtoshell_coap_handler_deinit(&app.coapAttach);
     nabtoshell_coap_handler_deinit(&app.coapCreate);
     nabtoshell_coap_handler_deinit(&app.coapStatus);
+    /* Shutdown ordering: join the control monitor thread first (it calls
+     * copy_active_match_for_ref which locks activeStreamsMutex), then join
+     * PTY reader threads (they call send_pattern_*_for_ref which locks
+     * streamListMutex), then destroy both listeners and their mutexes. */
+    nabtoshell_control_stream_listener_join_monitor(&app.controlStreamListener);
     nabtoshell_stream_listener_deinit(&app.streamListener);
     nabtoshell_control_stream_listener_deinit(&app.controlStreamListener);
 

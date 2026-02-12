@@ -157,21 +157,23 @@ void nabtoshell_pattern_engine_feed(nabtoshell_pattern_engine *e,
             &e->buffer, 512, &detect_len);
 
         /* Inline auto-detect (avoids recursive mutex lock via select_agent) */
-        char *lower = malloc(detect_len + 1);
-        for (size_t i = 0; i < detect_len; i++) {
-            lower[i] = tolower((unsigned char)detect_text[i]);
-        }
-        lower[detect_len] = '\0';
-
         const char *detected = NULL;
-        if (strstr(lower, "claude code") || strstr(lower, "claude.ai")) {
-            detected = "claude-code";
-        } else if (strstr(lower, "aider v") || strstr(lower, "aider ")) {
-            detected = "aider";
-        } else if (strstr(lower, "codex")) {
-            detected = "codex";
+        char *lower = malloc(detect_len + 1);
+        if (lower) {
+            for (size_t i = 0; i < detect_len; i++) {
+                lower[i] = tolower((unsigned char)detect_text[i]);
+            }
+            lower[detect_len] = '\0';
+
+            if (strstr(lower, "claude code") || strstr(lower, "claude.ai")) {
+                detected = "claude-code";
+            } else if (strstr(lower, "aider v") || strstr(lower, "aider ")) {
+                detected = "aider";
+            } else if (strstr(lower, "codex")) {
+                detected = "codex";
+            }
+            free(lower);
         }
-        free(lower);
 
         if (detected) {
             e->active_agent = strdup(detected);
@@ -291,6 +293,7 @@ void nabtoshell_pattern_engine_auto_detect(nabtoshell_pattern_engine *e,
 
     // Simple substring search (case-insensitive)
     char *lower = malloc(len + 1);
+    if (!lower) return;
     for (size_t i = 0; i < len; i++) {
         lower[i] = tolower((unsigned char)text[i]);
     }

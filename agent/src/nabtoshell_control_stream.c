@@ -136,14 +136,20 @@ void nabtoshell_control_stream_listener_stop(
     pthread_mutex_unlock(&csl->streamListMutex);
 }
 
-void nabtoshell_control_stream_listener_deinit(
+void nabtoshell_control_stream_listener_join_monitor(
     struct nabtoshell_control_stream_listener* csl)
 {
-    /* Wait for monitor thread */
     if (csl->monitorStarted) {
         pthread_join(csl->monitorThread, NULL);
         csl->monitorStarted = false;
     }
+}
+
+void nabtoshell_control_stream_listener_deinit(
+    struct nabtoshell_control_stream_listener* csl)
+{
+    /* Join monitor if not already joined */
+    nabtoshell_control_stream_listener_join_monitor(csl);
 
     /* Free all active control streams */
     pthread_mutex_lock(&csl->streamListMutex);
@@ -453,7 +459,10 @@ static uint8_t* encode_session_snapshot(const struct nabtoshell_tmux_list* list,
     }
 
     cbor_encoder_close_container(&mapEncoder, &arrayEncoder);
-    cbor_encoder_close_container(&encoder, &mapEncoder);
+    CborError err = cbor_encoder_close_container(&encoder, &mapEncoder);
+
+    if (err != CborNoError || cbor_encoder_get_extra_bytes_needed(&encoder) > 0)
+        return NULL;
 
     size_t cborLen = cbor_encoder_get_buffer_size(&encoder, cborBuf);
 
