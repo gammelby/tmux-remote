@@ -1,6 +1,9 @@
 #include "nabtoshell_control_stream.h"
 #include "nabtoshell.h"
 #include "nabtoshell_tmux.h"
+#include "nabtoshell_stream.h"
+#include "nabtoshell_pattern_matcher.h"
+#include "nabtoshell_pattern_cbor.h"
 
 #include <tinycbor/cbor.h>
 
@@ -20,8 +23,67 @@ static uint8_t* encode_session_snapshot(const struct nabtoshell_tmux_list* list,
                                         size_t* outLen);
 static bool tmux_lists_equal(const struct nabtoshell_tmux_list* a,
                              const struct nabtoshell_tmux_list* b);
+static void send_to_stream(struct nabtoshell_active_control_stream* cs,
+                           const uint8_t* data, size_t len);
 static void broadcast_to_all(struct nabtoshell_control_stream_listener* csl,
                              const uint8_t* data, size_t len);
+
+/* ---- Refcount-based lifetime management ---- */
+
+static void control_stream_retain(struct nabtoshell_active_control_stream* cs)
+{
+    atomic_fetch_add_explicit(&cs->refCount, 1, memory_order_relaxed);
+}
+
+static void control_stream_release_impl(struct nabtoshell_active_control_stream* cs)
+{
+    if (atomic_fetch_sub_explicit(&cs->refCount, 1, memory_order_acq_rel) == 1) {
+        if (cs->stream != NULL) {
+            nabto_device_stream_free(cs->stream);
+        }
+        pthread_mutex_destroy(&cs->writeMutex);
+        free(cs);
+    }
+}
+
+#ifdef NABTOSHELL_TESTING
+void nabtoshell_control_stream_release(struct nabtoshell_active_control_stream* cs)
+{
+    control_stream_release_impl(cs);
+}
+#endif
+
+/* Collect control streams matching a given connectionRef.
+ * Each returned pointer is retained; caller must release after use. */
+#ifdef NABTOSHELL_TESTING
+int nabtoshell_control_stream_collect_targets_for_ref(
+    struct nabtoshell_control_stream_listener* csl,
+    NabtoDeviceConnectionRef ref,
+    struct nabtoshell_active_control_stream** out,
+    int cap)
+#else
+static int collect_targets_for_ref(
+    struct nabtoshell_control_stream_listener* csl,
+    NabtoDeviceConnectionRef ref,
+    struct nabtoshell_active_control_stream** out,
+    int cap)
+#endif
+{
+    int count = 0;
+    pthread_mutex_lock(&csl->streamListMutex);
+    struct nabtoshell_active_control_stream* cs = csl->activeStreams;
+    while (cs != NULL && count < cap) {
+        if (!atomic_load(&cs->closing) && cs->connectionRef == ref) {
+            control_stream_retain(cs);
+            out[count++] = cs;
+        }
+        cs = cs->next;
+    }
+    pthread_mutex_unlock(&csl->streamListMutex);
+    return count;
+}
+
+/* ---- Public / Module API ---- */
 
 void nabtoshell_control_stream_listener_init(
     struct nabtoshell_control_stream_listener* csl,
@@ -91,11 +153,7 @@ void nabtoshell_control_stream_listener_deinit(
 
     while (cs != NULL) {
         struct nabtoshell_active_control_stream* next = cs->next;
-        if (cs->stream != NULL) {
-            nabto_device_stream_free(cs->stream);
-        }
-        pthread_mutex_destroy(&cs->writeMutex);
-        free(cs);
+        control_stream_release_impl(cs);  /* drop list ownership */
         cs = next;
     }
 
@@ -159,6 +217,8 @@ static void stream_callback(NabtoDeviceFuture* future, NabtoDeviceError ec,
     cs->device = csl->device;
     cs->app = csl->app;
     atomic_init(&cs->closing, false);
+    atomic_init(&cs->needsPatternSync, true);
+    atomic_init(&cs->refCount, 1);
     pthread_mutex_init(&cs->writeMutex, NULL);
 
     /* Accept the stream */
@@ -184,19 +244,16 @@ static void stream_accepted(NabtoDeviceFuture* future, NabtoDeviceError ec,
     nabto_device_future_free(future);
 
     if (ec != NABTO_DEVICE_EC_OK) {
-        nabto_device_stream_free(cs->stream);
-        pthread_mutex_destroy(&cs->writeMutex);
-        free(cs);
+        control_stream_release_impl(cs);
         return;
     }
 
     /* IAM check */
     NabtoDeviceConnectionRef ref =
         nabto_device_stream_get_connection_ref(cs->stream);
+    cs->connectionRef = ref;
     if (!nabtoshell_iam_check_access_ref(&cs->app->iam, ref, "Terminal:ListSessions")) {
-        nabto_device_stream_free(cs->stream);
-        pthread_mutex_destroy(&cs->writeMutex);
-        free(cs);
+        control_stream_release_impl(cs);
         return;
     }
 
@@ -257,6 +314,47 @@ static void* monitor_thread_func(void* arg)
             hasPrev = true;
         }
 
+        /* Replay active pattern match to newly connected control streams.
+         * Each control stream gets the match from the data stream sharing
+         * its connectionRef. */
+        {
+            struct nabtoshell_active_control_stream* syncSnapshot[MAX_CONTROL_STREAMS];
+            int syncCount = 0;
+
+            pthread_mutex_lock(&csl->streamListMutex);
+            struct nabtoshell_active_control_stream* sc = csl->activeStreams;
+            while (sc != NULL && syncCount < MAX_CONTROL_STREAMS) {
+                if (atomic_load(&sc->needsPatternSync) &&
+                    !atomic_load(&sc->closing)) {
+                    control_stream_retain(sc);
+                    syncSnapshot[syncCount++] = sc;
+                    atomic_store(&sc->needsPatternSync, false);
+                }
+                sc = sc->next;
+            }
+            pthread_mutex_unlock(&csl->streamListMutex);
+
+            if (syncCount > 0) {
+                for (int i = 0; i < syncCount; i++) {
+                    nabtoshell_pattern_match* match =
+                        nabtoshell_stream_copy_active_match_for_ref(
+                            &csl->app->streamListener,
+                            syncSnapshot[i]->connectionRef);
+                    if (match != NULL) {
+                        size_t matchMsgLen = 0;
+                        uint8_t* matchMsg =
+                            nabtoshell_pattern_cbor_encode_match(match, &matchMsgLen);
+                        if (matchMsg != NULL) {
+                            send_to_stream(syncSnapshot[i], matchMsg, matchMsgLen);
+                            free(matchMsg);
+                        }
+                        nabtoshell_pattern_match_free(match);
+                    }
+                    control_stream_release_impl(syncSnapshot[i]);
+                }
+            }
+        }
+
         /* Remove closed streams from the list */
         pthread_mutex_lock(&csl->streamListMutex);
         struct nabtoshell_active_control_stream** pp = &csl->activeStreams;
@@ -264,11 +362,7 @@ static void* monitor_thread_func(void* arg)
             if (atomic_load(&(*pp)->closing)) {
                 struct nabtoshell_active_control_stream* dead = *pp;
                 *pp = dead->next;
-                if (dead->stream != NULL) {
-                    nabto_device_stream_free(dead->stream);
-                }
-                pthread_mutex_destroy(&dead->writeMutex);
-                free(dead);
+                control_stream_release_impl(dead);  /* drop list ownership */
             } else {
                 pp = &(*pp)->next;
             }
@@ -380,15 +474,37 @@ static uint8_t* encode_session_snapshot(const struct nabtoshell_tmux_list* list,
 }
 
 /*
+ * Write a length-prefixed message to a single control stream.
+ * Called from the monitor thread, so blocking writes are safe.
+ * The stream's writeMutex serializes I/O and the closing flag guards
+ * against writes to freed streams.
+ */
+static void send_to_stream(struct nabtoshell_active_control_stream* cs,
+                           const uint8_t* data, size_t len)
+{
+    if (atomic_load(&cs->closing)) return;
+    pthread_mutex_lock(&cs->writeMutex);
+    if (!atomic_load(&cs->closing)) {
+        NabtoDeviceFuture* f = nabto_device_future_new(cs->device);
+        if (f != NULL) {
+            nabto_device_stream_write(cs->stream, f, data, len);
+            NabtoDeviceError ec = nabto_device_future_wait(f);
+            nabto_device_future_free(f);
+            if (ec != NABTO_DEVICE_EC_OK) {
+                atomic_store(&cs->closing, true);
+            }
+        }
+    }
+    pthread_mutex_unlock(&cs->writeMutex);
+}
+
+/*
  * Send the encoded message to all connected control streams.
  * Called from the monitor thread, so blocking writes are safe.
  *
  * Takes a snapshot of active stream pointers under the mutex, then
- * iterates the snapshot without holding the list lock. Each stream's
- * writeMutex serializes the actual I/O and the closing flag guards
- * against writes to freed streams.
+ * iterates the snapshot without holding the list lock.
  */
-#define MAX_CONTROL_STREAMS 16
 static void broadcast_to_all(struct nabtoshell_control_stream_listener* csl,
                              const uint8_t* data, size_t len)
 {
@@ -406,22 +522,48 @@ static void broadcast_to_all(struct nabtoshell_control_stream_listener* csl,
     pthread_mutex_unlock(&csl->streamListMutex);
 
     for (int i = 0; i < count; i++) {
-        cs = snapshot[i];
-        if (atomic_load(&cs->closing)) {
-            continue;
-        }
-        pthread_mutex_lock(&cs->writeMutex);
-        if (!atomic_load(&cs->closing)) {
-            NabtoDeviceFuture* writeFuture = nabto_device_future_new(cs->device);
-            if (writeFuture != NULL) {
-                nabto_device_stream_write(cs->stream, writeFuture, data, len);
-                NabtoDeviceError ec = nabto_device_future_wait(writeFuture);
-                nabto_device_future_free(writeFuture);
-                if (ec != NABTO_DEVICE_EC_OK) {
-                    atomic_store(&cs->closing, true);
-                }
-            }
-        }
-        pthread_mutex_unlock(&cs->writeMutex);
+        send_to_stream(snapshot[i], data, len);
     }
+}
+
+static void send_to_ref(struct nabtoshell_control_stream_listener* csl,
+                         NabtoDeviceConnectionRef ref,
+                         const uint8_t* data, size_t len)
+{
+    struct nabtoshell_active_control_stream* snapshot[MAX_CONTROL_STREAMS];
+#ifdef NABTOSHELL_TESTING
+    int count = nabtoshell_control_stream_collect_targets_for_ref(
+        csl, ref, snapshot, MAX_CONTROL_STREAMS);
+#else
+    int count = collect_targets_for_ref(csl, ref, snapshot, MAX_CONTROL_STREAMS);
+#endif
+    for (int i = 0; i < count; i++) {
+        send_to_stream(snapshot[i], data, len);
+        control_stream_release_impl(snapshot[i]);
+    }
+}
+
+void nabtoshell_control_stream_send_pattern_match_for_ref(
+    struct nabtoshell_control_stream_listener* csl,
+    NabtoDeviceConnectionRef ref,
+    const nabtoshell_pattern_match* match)
+{
+    size_t msgLen = 0;
+    uint8_t* buf = nabtoshell_pattern_cbor_encode_match(match, &msgLen);
+    if (buf == NULL) return;
+
+    send_to_ref(csl, ref, buf, msgLen);
+    free(buf);
+}
+
+void nabtoshell_control_stream_send_pattern_dismiss_for_ref(
+    struct nabtoshell_control_stream_listener* csl,
+    NabtoDeviceConnectionRef ref)
+{
+    size_t msgLen = 0;
+    uint8_t* buf = nabtoshell_pattern_cbor_encode_dismiss(&msgLen);
+    if (buf == NULL) return;
+
+    send_to_ref(csl, ref, buf, msgLen);
+    free(buf);
 }

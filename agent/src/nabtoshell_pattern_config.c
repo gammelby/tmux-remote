@@ -10,6 +10,7 @@ static char *strdup_safe(const char *s)
 
 static nabtoshell_pattern_type parse_type(const char *s)
 {
+    if (!s) return PATTERN_TYPE_YES_NO;
     if (strcmp(s, "yes_no") == 0) return PATTERN_TYPE_YES_NO;
     if (strcmp(s, "numbered_menu") == 0) return PATTERN_TYPE_NUMBERED_MENU;
     if (strcmp(s, "accept_reject") == 0) return PATTERN_TYPE_ACCEPT_REJECT;
@@ -70,18 +71,27 @@ nabtoshell_pattern_config *nabtoshell_pattern_config_parse(const char *json, siz
         ac->patterns = calloc(pcount > 0 ? pcount : 1, sizeof(nabtoshell_pattern_definition));
         ac->pattern_count = pcount;
 
+        int valid = 0;
         for (int pi = 0; pi < pcount; pi++) {
             cJSON *pitem = cJSON_GetArrayItem(patterns, pi);
-            nabtoshell_pattern_definition *pd = &ac->patterns[pi];
+            nabtoshell_pattern_definition *pd = &ac->patterns[valid];
 
             cJSON *id = cJSON_GetObjectItem(pitem, "id");
             pd->id = strdup_safe(cJSON_GetStringValue(id));
-
-            cJSON *type = cJSON_GetObjectItem(pitem, "type");
-            pd->type = parse_type(cJSON_GetStringValue(type));
+            if (!pd->id) {
+                continue;  /* skip: id is required */
+            }
 
             cJSON *regex = cJSON_GetObjectItem(pitem, "regex");
             pd->regex = strdup_safe(cJSON_GetStringValue(regex));
+            if (!pd->regex) {
+                free(pd->id);
+                memset(pd, 0, sizeof(*pd));
+                continue;  /* skip: regex is required */
+            }
+
+            cJSON *type = cJSON_GetObjectItem(pitem, "type");
+            pd->type = parse_type(cJSON_GetStringValue(type));
 
             cJSON *multi_line = cJSON_GetObjectItem(pitem, "multi_line");
             pd->multi_line = cJSON_IsBool(multi_line) && cJSON_IsTrue(multi_line);
@@ -90,22 +100,37 @@ nabtoshell_pattern_config *nabtoshell_pattern_config_parse(const char *json, siz
             cJSON *actions = cJSON_GetObjectItem(pitem, "actions");
             if (cJSON_IsArray(actions)) {
                 int acount = cJSON_GetArraySize(actions);
-                pd->actions = calloc(acount, sizeof(nabtoshell_pattern_action));
-                pd->action_count = acount;
+                pd->actions = calloc(acount > 0 ? acount : 1, sizeof(nabtoshell_pattern_action));
+                int avalid = 0;
                 for (int j = 0; j < acount; j++) {
                     cJSON *a = cJSON_GetArrayItem(actions, j);
-                    pd->actions[j].label = strdup_safe(cJSON_GetStringValue(cJSON_GetObjectItem(a, "label")));
-                    pd->actions[j].keys = strdup_safe(cJSON_GetStringValue(cJSON_GetObjectItem(a, "keys")));
+                    char *label = strdup_safe(cJSON_GetStringValue(cJSON_GetObjectItem(a, "label")));
+                    char *keys = strdup_safe(cJSON_GetStringValue(cJSON_GetObjectItem(a, "keys")));
+                    if (!label || !keys) {
+                        free(label);
+                        free(keys);
+                        continue;  /* skip invalid action */
+                    }
+                    pd->actions[avalid].label = label;
+                    pd->actions[avalid].keys = keys;
+                    avalid++;
                 }
+                pd->action_count = avalid;
             }
 
             // Action template (for numbered_menu)
             cJSON *tmpl = cJSON_GetObjectItem(pitem, "action_template");
             if (cJSON_IsObject(tmpl)) {
-                pd->action_template = calloc(1, sizeof(nabtoshell_pattern_action_template));
-                pd->action_template->keys = strdup_safe(cJSON_GetStringValue(cJSON_GetObjectItem(tmpl, "keys")));
+                char *tmpl_keys = strdup_safe(cJSON_GetStringValue(cJSON_GetObjectItem(tmpl, "keys")));
+                if (tmpl_keys) {
+                    pd->action_template = calloc(1, sizeof(nabtoshell_pattern_action_template));
+                    pd->action_template->keys = tmpl_keys;
+                }
             }
+
+            valid++;
         }
+        ac->pattern_count = valid;
         ai++;
     }
 

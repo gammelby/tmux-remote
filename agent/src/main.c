@@ -23,6 +23,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <time.h>
+#include <dirent.h>
 
 #define NEWLINE "\n"
 
@@ -83,6 +84,7 @@ static bool make_directory(const char* directory);
 static bool make_directories(const char* homeDir);
 static char* get_default_home_dir(void);
 static bool run_agent(const struct args* args);
+static void load_pattern_configs(struct nabtoshell* app);
 static void print_help(void);
 
 int main(int argc, char** argv)
@@ -264,6 +266,9 @@ bool run_agent(const struct args* args)
     /* Initialize stream listeners */
     nabtoshell_stream_listener_init(&app.streamListener, app.device, &app);
     nabtoshell_control_stream_listener_init(&app.controlStreamListener, app.device, &app);
+
+    /* Load pattern detection configs (activates per-stream on connect) */
+    load_pattern_configs(&app);
 
     /* Print banner */
     char* deviceFingerprint = NULL;
@@ -506,6 +511,8 @@ bool make_directories(const char* homeDir)
     make_directory(buffer);
     snprintf(buffer, sizeof(buffer), "%s/keys", homeDir);
     make_directory(buffer);
+    snprintf(buffer, sizeof(buffer), "%s/patterns", homeDir);
+    make_directory(buffer);
     return true;
 }
 
@@ -518,6 +525,72 @@ char* get_default_home_dir(void)
     char buffer[512];
     snprintf(buffer, sizeof(buffer), "%s/.nabtoshell", home);
     return strdup(buffer);
+}
+
+/*
+ * Load pattern config files from ~/.nabtoshell/patterns/*.json.
+ */
+void load_pattern_configs(struct nabtoshell* app)
+{
+    char dirPath[512];
+    snprintf(dirPath, sizeof(dirPath), "%s/patterns", app->homeDir);
+
+    DIR* dir = opendir(dirPath);
+    if (dir == NULL) {
+        return;
+    }
+
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        size_t nameLen = strlen(entry->d_name);
+        if (nameLen < 6 || strcmp(entry->d_name + nameLen - 5, ".json") != 0) {
+            continue;
+        }
+
+        char filePath[512];
+        snprintf(filePath, sizeof(filePath), "%s/%s", dirPath, entry->d_name);
+
+        FILE* f = fopen(filePath, "r");
+        if (f == NULL) {
+            continue;
+        }
+
+        fseek(f, 0, SEEK_END);
+        long fsize = ftell(f);
+        fseek(f, 0, SEEK_SET);
+
+        if (fsize <= 0 || fsize > 1024 * 1024) {
+            fclose(f);
+            continue;
+        }
+
+        char* json = malloc(fsize + 1);
+        size_t readLen = fread(json, 1, fsize, f);
+        fclose(f);
+        json[readLen] = '\0';
+
+        nabtoshell_pattern_config* cfg = nabtoshell_pattern_config_parse(json, readLen);
+        free(json);
+
+        if (cfg == NULL) {
+            printf("Warning: failed to parse pattern config %s" NEWLINE, filePath);
+            continue;
+        }
+
+        if (app->patternConfig != NULL) {
+            nabtoshell_pattern_config_free(app->patternConfig);
+        }
+        app->patternConfig = cfg;
+        printf("Loaded pattern config: %s (%d agents)" NEWLINE,
+               entry->d_name, cfg->agent_count);
+    }
+
+    closedir(dir);
+
+    if (app->patternConfig != NULL) {
+        printf("Pattern config loaded (%d agents), activates per-session" NEWLINE,
+               app->patternConfig->agent_count);
+    }
 }
 
 void print_help(void)

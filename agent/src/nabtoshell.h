@@ -3,6 +3,7 @@
 
 #include "nabtoshell_coap_handler.h"
 #include "nabtoshell_control_stream.h"
+#include "nabtoshell_pattern_config.h"
 #include "nabtoshell_session.h"
 #include "nabtoshell_stream.h"
 #include "nabtoshell_iam.h"
@@ -39,6 +40,9 @@ struct nabtoshell {
 
     /* Session tracking */
     struct nabtoshell_session_map sessionMap;
+
+    /* Pattern detection config (shared by per-stream engines) */
+    nabtoshell_pattern_config* patternConfig;
 
     /* Uptime tracking */
     time_t startTime;

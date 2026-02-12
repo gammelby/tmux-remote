@@ -410,6 +410,60 @@ START_TEST(test_full_pipeline_with_newlines_and_colors)
 }
 END_TEST
 
+START_TEST(test_utf8_boundary_2byte)
+{
+    /* Fill buffer near capacity with ASCII, ending with first byte of a
+     * 2-byte UTF-8 sequence (e.g. 0xC2 for U+00B7). After rolling buffer
+     * trims, the orphan continuation byte at the start should be skipped,
+     * and matching should still work. */
+    nabtoshell_pattern_engine_select_agent(&engine, "test");
+
+    /* Fill most of the 8192-byte buffer */
+    char filler[8100];
+    memset(filler, 'a', sizeof(filler) - 1);
+    /* End with first byte of 2-byte seq (will be split when buffer rolls) */
+    filler[sizeof(filler) - 2] = (char)0xC2;
+    filler[sizeof(filler) - 1] = '\0';
+    feed_string(&engine, filler);
+
+    /* Feed second byte (continuation) + more content + prompt.
+     * The continuation byte becomes orphaned at buffer start after trim. */
+    char chunk2[256];
+    chunk2[0] = (char)0xB7;  /* second byte of U+00B7 */
+    memset(chunk2 + 1, 'b', 200);
+    strcpy(chunk2 + 201, "Continue? (y/n)");
+    feed_string(&engine, chunk2);
+
+    ck_assert_ptr_nonnull(engine.active_match);
+    ck_assert_str_eq(engine.active_match->id, "yn");
+}
+END_TEST
+
+START_TEST(test_utf8_boundary_3byte)
+{
+    /* Same test with a 3-byte sequence (U+276F = E2 9D AF). */
+    nabtoshell_pattern_engine_select_agent(&engine, "test");
+
+    char filler[8100];
+    memset(filler, 'a', sizeof(filler) - 1);
+    /* End with first byte of 3-byte seq */
+    filler[sizeof(filler) - 2] = (char)0xE2;
+    filler[sizeof(filler) - 1] = '\0';
+    feed_string(&engine, filler);
+
+    /* Feed remaining 2 bytes of U+276F + prompt */
+    char chunk2[256];
+    chunk2[0] = (char)0x9D;
+    chunk2[1] = (char)0xAF;
+    memset(chunk2 + 2, 'b', 200);
+    strcpy(chunk2 + 202, "Continue? (y/n)");
+    feed_string(&engine, chunk2);
+
+    ck_assert_ptr_nonnull(engine.active_match);
+    ck_assert_str_eq(engine.active_match->id, "yn");
+}
+END_TEST
+
 Suite *pattern_engine_suite(void)
 {
     Suite *s = suite_create("PatternEngine");
@@ -431,6 +485,8 @@ Suite *pattern_engine_suite(void)
     tcase_add_test(tc, test_auto_detect_does_not_override);
     tcase_add_test(tc, test_full_pipeline_with_cursor_positioning);
     tcase_add_test(tc, test_full_pipeline_with_newlines_and_colors);
+    tcase_add_test(tc, test_utf8_boundary_2byte);
+    tcase_add_test(tc, test_utf8_boundary_3byte);
 
     suite_add_tcase(s, tc);
     return s;

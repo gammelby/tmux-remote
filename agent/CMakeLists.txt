@@ -28,6 +28,7 @@ set(pattern_src
   src/nabtoshell_pattern_config.c
   src/nabtoshell_pattern_matcher.c
   src/nabtoshell_pattern_engine.c
+  src/nabtoshell_pattern_cbor.c
 )
 
 set(src
@@ -84,7 +85,8 @@ if(CHECK_FOUND)
   # Static library for pattern detection (no Nabto SDK dependency)
   add_library(nabtoshell_pattern STATIC ${pattern_src})
   target_include_directories(nabtoshell_pattern PUBLIC src)
-  target_link_libraries(nabtoshell_pattern PUBLIC cjson PkgConfig::PCRE2)
+  target_link_libraries(nabtoshell_pattern PUBLIC
+    cjson PkgConfig::PCRE2 TinyCBOR::tinycbor Threads::Threads)
 
   # Test: ANSI Stripper
   add_executable(test_ansi_stripper tests/test_ansi_stripper.c)
@@ -105,4 +107,18 @@ if(CHECK_FOUND)
   add_executable(test_pattern_engine tests/test_pattern_engine.c)
   target_link_libraries(test_pattern_engine nabtoshell_pattern PkgConfig::CHECK)
   add_test(NAME pattern_engine COMMAND test_pattern_engine)
+
+  # Test: Pattern Broadcast (CBOR roundtrip, integration, thread safety)
+  add_executable(test_pattern_broadcast tests/test_pattern_broadcast.c)
+  target_link_libraries(test_pattern_broadcast nabtoshell_pattern PkgConfig::CHECK)
+  add_test(NAME pattern_broadcast COMMAND test_pattern_broadcast)
+
+  # Test: Pattern Routing (per-stream isolation, ref-scoped delivery)
+  add_executable(test_pattern_routing tests/test_pattern_routing.c)
+  target_link_libraries(test_pattern_routing nabtoshell_pattern PkgConfig::CHECK)
+  target_include_directories(test_pattern_routing PRIVATE
+    ${NABTO_SDK_SRC}/include
+  )
+  target_compile_definitions(test_pattern_routing PRIVATE NABTOSHELL_TESTING)
+  add_test(NAME pattern_routing COMMAND test_pattern_routing)
 endif()

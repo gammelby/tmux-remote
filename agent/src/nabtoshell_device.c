@@ -11,6 +11,10 @@ void nabtoshell_init(struct nabtoshell* app)
 
 void nabtoshell_deinit(struct nabtoshell* app)
 {
+    if (app->patternConfig) {
+        nabtoshell_pattern_config_free(app->patternConfig);
+        app->patternConfig = NULL;
+    }
     free(app->homeDir);
     free(app->deviceConfigFile);
     free(app->deviceKeyFile);

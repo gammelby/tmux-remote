@@ -142,6 +142,123 @@ START_TEST(test_optional_multi_line)
 }
 END_TEST
 
+START_TEST(test_missing_id_skips_pattern)
+{
+    const char *json =
+        "{"
+        "  \"version\": 1,"
+        "  \"agents\": {"
+        "    \"a\": {"
+        "      \"name\": \"A\","
+        "      \"patterns\": [{"
+        "        \"type\": \"yes_no\","
+        "        \"regex\": \"test\","
+        "        \"actions\": [{\"label\": \"Y\", \"keys\": \"y\"}]"
+        "      }]"
+        "    }"
+        "  }"
+        "}";
+
+    nabtoshell_pattern_config *cfg = nabtoshell_pattern_config_parse(json, strlen(json));
+    ck_assert_ptr_nonnull(cfg);
+    const nabtoshell_agent_config *agent = nabtoshell_pattern_config_find_agent(cfg, "a");
+    ck_assert_ptr_nonnull(agent);
+    ck_assert_int_eq(agent->pattern_count, 0);
+
+    nabtoshell_pattern_config_free(cfg);
+}
+END_TEST
+
+START_TEST(test_missing_regex_skips_pattern)
+{
+    const char *json =
+        "{"
+        "  \"version\": 1,"
+        "  \"agents\": {"
+        "    \"a\": {"
+        "      \"name\": \"A\","
+        "      \"patterns\": [{"
+        "        \"id\": \"p1\","
+        "        \"type\": \"yes_no\","
+        "        \"actions\": [{\"label\": \"Y\", \"keys\": \"y\"}]"
+        "      }]"
+        "    }"
+        "  }"
+        "}";
+
+    nabtoshell_pattern_config *cfg = nabtoshell_pattern_config_parse(json, strlen(json));
+    ck_assert_ptr_nonnull(cfg);
+    const nabtoshell_agent_config *agent = nabtoshell_pattern_config_find_agent(cfg, "a");
+    ck_assert_ptr_nonnull(agent);
+    ck_assert_int_eq(agent->pattern_count, 0);
+
+    nabtoshell_pattern_config_free(cfg);
+}
+END_TEST
+
+START_TEST(test_missing_type_defaults_yes_no)
+{
+    const char *json =
+        "{"
+        "  \"version\": 1,"
+        "  \"agents\": {"
+        "    \"a\": {"
+        "      \"name\": \"A\","
+        "      \"patterns\": [{"
+        "        \"id\": \"p1\","
+        "        \"regex\": \"test\","
+        "        \"actions\": [{\"label\": \"Y\", \"keys\": \"y\"}]"
+        "      }]"
+        "    }"
+        "  }"
+        "}";
+
+    nabtoshell_pattern_config *cfg = nabtoshell_pattern_config_parse(json, strlen(json));
+    ck_assert_ptr_nonnull(cfg);
+    const nabtoshell_agent_config *agent = nabtoshell_pattern_config_find_agent(cfg, "a");
+    ck_assert_ptr_nonnull(agent);
+    ck_assert_int_eq(agent->pattern_count, 1);
+    ck_assert_int_eq(agent->patterns[0].type, PATTERN_TYPE_YES_NO);
+
+    nabtoshell_pattern_config_free(cfg);
+}
+END_TEST
+
+START_TEST(test_null_action_fields_skipped)
+{
+    const char *json =
+        "{"
+        "  \"version\": 1,"
+        "  \"agents\": {"
+        "    \"a\": {"
+        "      \"name\": \"A\","
+        "      \"patterns\": [{"
+        "        \"id\": \"p1\","
+        "        \"type\": \"yes_no\","
+        "        \"regex\": \"test\","
+        "        \"actions\": ["
+        "          {\"label\": \"Y\", \"keys\": \"y\"},"
+        "          {\"keys\": \"n\"},"
+        "          {\"label\": \"Maybe\"}"
+        "        ]"
+        "      }]"
+        "    }"
+        "  }"
+        "}";
+
+    nabtoshell_pattern_config *cfg = nabtoshell_pattern_config_parse(json, strlen(json));
+    ck_assert_ptr_nonnull(cfg);
+    const nabtoshell_agent_config *agent = nabtoshell_pattern_config_find_agent(cfg, "a");
+    ck_assert_ptr_nonnull(agent);
+    ck_assert_int_eq(agent->pattern_count, 1);
+    ck_assert_int_eq(agent->patterns[0].action_count, 1);
+    ck_assert_str_eq(agent->patterns[0].actions[0].label, "Y");
+    ck_assert_str_eq(agent->patterns[0].actions[0].keys, "y");
+
+    nabtoshell_pattern_config_free(cfg);
+}
+END_TEST
+
 Suite *pattern_config_suite(void)
 {
     Suite *s = suite_create("PatternConfig");
@@ -153,6 +270,10 @@ Suite *pattern_config_suite(void)
     tcase_add_test(tc, test_invalid_json);
     tcase_add_test(tc, test_missing_required_fields);
     tcase_add_test(tc, test_optional_multi_line);
+    tcase_add_test(tc, test_missing_id_skips_pattern);
+    tcase_add_test(tc, test_missing_regex_skips_pattern);
+    tcase_add_test(tc, test_missing_type_defaults_yes_no);
+    tcase_add_test(tc, test_null_action_fields_skipped);
 
     suite_add_tcase(s, tc);
     return s;

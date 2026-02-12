@@ -8,6 +8,7 @@
 
 #define NABTOSHELL_CONTROL_STREAM_PORT 2
 #define NABTOSHELL_SESSION_POLL_INTERVAL_MS 2000
+#define MAX_CONTROL_STREAMS 16
 
 struct nabtoshell;
 
@@ -17,6 +18,9 @@ struct nabtoshell_active_control_stream {
     struct nabtoshell* app;
     pthread_mutex_t writeMutex;
     atomic_bool closing;
+    atomic_bool needsPatternSync;
+    NabtoDeviceConnectionRef connectionRef;
+    atomic_uint refCount;
     struct nabtoshell_active_control_stream* next;
 };
 
@@ -56,5 +60,31 @@ void nabtoshell_control_stream_listener_deinit(
  * from any thread including Nabto callback threads (non-blocking). */
 void nabtoshell_control_stream_notify(
     struct nabtoshell_control_stream_listener* csl);
+
+/* Send a pattern match event to control stream(s) matching the given
+ * connectionRef. Safe to call from any thread. */
+#include "nabtoshell_pattern_matcher.h"
+void nabtoshell_control_stream_send_pattern_match_for_ref(
+    struct nabtoshell_control_stream_listener* csl,
+    NabtoDeviceConnectionRef ref,
+    const nabtoshell_pattern_match* match);
+
+/* Send a pattern dismiss event to control stream(s) matching the given
+ * connectionRef. Safe to call from any thread. */
+void nabtoshell_control_stream_send_pattern_dismiss_for_ref(
+    struct nabtoshell_control_stream_listener* csl,
+    NabtoDeviceConnectionRef ref);
+
+#ifdef NABTOSHELL_TESTING
+/* Test seam: collect control streams matching ref. Retains each target.
+ * Caller must release via control_stream_release after use. */
+int nabtoshell_control_stream_collect_targets_for_ref(
+    struct nabtoshell_control_stream_listener* csl,
+    NabtoDeviceConnectionRef ref,
+    struct nabtoshell_active_control_stream** out,
+    int cap);
+
+void nabtoshell_control_stream_release(struct nabtoshell_active_control_stream* cs);
+#endif
 
 #endif
