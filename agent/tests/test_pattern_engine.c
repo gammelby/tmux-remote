@@ -675,6 +675,167 @@ START_TEST(test_duplicate_prompt_uses_latest)
 }
 END_TEST
 
+START_TEST(test_consume_then_new_prompt)
+{
+    /* Reproduces the bug from pty-log-1: first prompt matches, user acts
+     * on it (iOS consume(), no dismiss sent to agent), TUI redraws keep
+     * the match alive via age-reset, then the first prompt leaves and a
+     * second prompt appears. The engine must detect the second prompt.
+     *
+     * Without a fix, the active_match from the first prompt is never
+     * cleared, so the engine stays in "skip-new-match" and never fires
+     * a callback for the second prompt. */
+    const char *menu_json =
+        "{"
+        "  \"version\": 1,"
+        "  \"agents\": {"
+        "    \"claude-code\": {"
+        "      \"name\": \"Claude Code\","
+        "      \"patterns\": [{"
+        "        \"id\": \"numbered_prompt\","
+        "        \"type\": \"numbered_menu\","
+        "        \"regex\": \"Do you want to .+\\\\?\\\\n.*1\\\\. .+\\\\n.*2\\\\. .+\","
+        "        \"multi_line\": true,"
+        "        \"action_template\": {\"keys\": \"{number}\"}"
+        "      }]"
+        "    }"
+        "  }"
+        "}";
+
+    nabtoshell_pattern_config *mcfg = nabtoshell_pattern_config_parse(menu_json, strlen(menu_json));
+    nabtoshell_pattern_engine me;
+    nabtoshell_pattern_engine_init(&me);
+    nabtoshell_pattern_engine_load_config(&me, mcfg);
+    nabtoshell_pattern_engine_select_agent(&me, "claude-code");
+
+    /* Track callbacks */
+    int match_count = 0;
+    int dismiss_count = 0;
+
+    /* We cannot easily use a callback with local state, so just check
+     * engine state directly (tests access struct internals). */
+
+    /* Step 1: First prompt appears and matches. */
+    feed_string(&me, "Do you want to create foo.txt?\n"
+                     "\xe2\x9d\xaf 1. Yes\n"
+                     "  2. Yes, allow all\n"
+                     "  3. No\n");
+    ck_assert_ptr_nonnull(me.active_match);
+    ck_assert_str_eq(me.active_match->id, "numbered_prompt");
+    ck_assert_int_eq(me.active_match->action_count, 3);
+
+    /* Step 2: User acts on the prompt (presses "3"). On the iOS side,
+     * consume() is called, which does NOT send pattern_dismiss to the
+     * agent. The agent never learns the user acted. Meanwhile, the TUI
+     * continues redrawing the same prompt. Feed ~1600 chars of filler
+     * then the same prompt again (TUI redraw). */
+    char filler[1700];
+    memset(filler, 'x', 1600);
+    filler[1600] = '\0';
+    feed_string(&me, filler);
+
+    /* TUI redraw of the first prompt (age-reset should fire). */
+    feed_string(&me, "Do you want to create foo.txt?\n"
+                     "\xe2\x9d\xaf 1. Yes\n"
+                     "  2. Yes, allow all\n"
+                     "  3. No\n");
+
+    /* Step 3: The first prompt leaves the screen. Feed enough filler to
+     * push it past the auto-dismiss window AND ensure the auto-dismiss
+     * check fires (> 1500 chars from last age-reset). */
+    char filler2[4200];
+    memset(filler2, 'y', 4100);
+    filler2[4100] = '\0';
+    feed_string(&me, filler2);
+
+    /* At this point the first prompt should be auto-dismissed. */
+    ck_assert_ptr_null(me.active_match);
+
+    /* Step 4: Second prompt appears. */
+    feed_string(&me, "Do you want to create bar.txt?\n"
+                     "\xe2\x9d\xaf 1. Yes\n"
+                     "  2. Yes, allow all\n"
+                     "  3. No\n");
+
+    /* The engine must detect the second prompt. */
+    ck_assert_ptr_nonnull(me.active_match);
+    ck_assert_str_eq(me.active_match->id, "numbered_prompt");
+    ck_assert_int_eq(me.active_match->action_count, 3);
+
+    nabtoshell_pattern_engine_free(&me);
+    nabtoshell_pattern_config_free(mcfg);
+}
+END_TEST
+
+START_TEST(test_consume_no_dismiss_short_gap)
+{
+    /* Variant: the gap between prompts is short (< AUTO_DISMISS), so auto-
+     * dismiss never fires. The engine has active_match from prompt 1 and
+     * the TUI replaces it with prompt 2 in place. The engine must detect
+     * that the prompt TEXT changed and fire a new match event.
+     *
+     * In the real recording, the gap is about 1200 chars (below 1500
+     * AUTO_DISMISS threshold), so auto-dismiss never checks. The old match
+     * blocks detection of the new prompt indefinitely. */
+    const char *menu_json =
+        "{"
+        "  \"version\": 1,"
+        "  \"agents\": {"
+        "    \"claude-code\": {"
+        "      \"name\": \"Claude Code\","
+        "      \"patterns\": [{"
+        "        \"id\": \"numbered_prompt\","
+        "        \"type\": \"numbered_menu\","
+        "        \"regex\": \"Do you want to .+\\\\?\\\\n.*1\\\\. .+\\\\n.*2\\\\. .+\","
+        "        \"multi_line\": true,"
+        "        \"action_template\": {\"keys\": \"{number}\"}"
+        "      }]"
+        "    }"
+        "  }"
+        "}";
+
+    nabtoshell_pattern_config *mcfg = nabtoshell_pattern_config_parse(menu_json, strlen(menu_json));
+    nabtoshell_pattern_engine me;
+    nabtoshell_pattern_engine_init(&me);
+    nabtoshell_pattern_engine_load_config(&me, mcfg);
+    nabtoshell_pattern_engine_select_agent(&me, "claude-code");
+
+    /* Step 1: First prompt matches. */
+    feed_string(&me, "Do you want to create foo.txt?\n"
+                     "\xe2\x9d\xaf 1. Yes\n"
+                     "  2. Yes, allow all\n"
+                     "  3. No\n");
+    ck_assert_ptr_nonnull(me.active_match);
+    ck_assert_int_eq(me.active_match->action_count, 3);
+
+    /* Step 2: Short gap (< 1500 chars), then second prompt appears.
+     * In a real session the user pressed "3", CC processed it, and
+     * immediately showed a new prompt. The gap is too short for auto-
+     * dismiss to trigger, so the old active_match is still set. */
+    char filler[1200];
+    memset(filler, 'z', 1100);
+    filler[1100] = '\0';
+    feed_string(&me, filler);
+
+    feed_string(&me, "Do you want to create bar.txt?\n"
+                     "\xe2\x9d\xaf 1. Yes\n"
+                     "  2. Yes, allow all\n"
+                     "  3. No\n");
+
+    /* The engine must detect the SECOND prompt, even though the first
+     * active_match was never dismissed. The prompt text changed. */
+    ck_assert_ptr_nonnull(me.active_match);
+    /* This is the critical assertion: the match should reflect the NEW
+     * prompt, not the old one stuck from the first match. Since both
+     * prompts use the same pattern id, we can't distinguish by id.
+     * Instead, verify the match position advanced past the first prompt. */
+    ck_assert(me.active_match->match_position > 1100);
+
+    nabtoshell_pattern_engine_free(&me);
+    nabtoshell_pattern_config_free(mcfg);
+}
+END_TEST
+
 Suite *pattern_engine_suite(void)
 {
     Suite *s = suite_create("PatternEngine");
@@ -702,6 +863,8 @@ Suite *pattern_engine_suite(void)
     tcase_add_test(tc, test_utf8_boundary_3byte);
     tcase_add_test(tc, test_incremental_item_arrival);
     tcase_add_test(tc, test_duplicate_prompt_uses_latest);
+    tcase_add_test(tc, test_consume_then_new_prompt);
+    tcase_add_test(tc, test_consume_no_dismiss_short_gap);
 
     suite_add_tcase(s, tc);
     return s;
