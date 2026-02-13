@@ -3,7 +3,6 @@
 
 struct nabtoshell;
 
-void nabtoshell_print_banner(struct nabtoshell* app, const char* fingerprint,
-                             const char* pairingString);
+void nabtoshell_print_banner(struct nabtoshell* app, const char* fingerprint);
 
 #endif

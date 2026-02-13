@@ -11,8 +11,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <arpa/inet.h>
 
 #define NEWLINE "\n"
+#define MAX_SESSION_SNAPSHOT_CBOR 65535
 
 static void start_listen(struct nabtoshell_control_stream_listener* csl);
 static void stream_callback(NabtoDeviceFuture* future, NabtoDeviceError ec,
@@ -229,6 +231,7 @@ static void stream_callback(NabtoDeviceFuture* future, NabtoDeviceError ec,
     cs->app = csl->app;
     atomic_init(&cs->closing, false);
     atomic_init(&cs->needsPatternSync, true);
+    atomic_init(&cs->needsSessionSync, true);
     atomic_init(&cs->refCount, 1);
     pthread_mutex_init(&cs->writeMutex, NULL);
 
@@ -402,13 +405,43 @@ static void* monitor_thread_func(void* arg)
 
         bool changed = !hasPrev || !tmux_lists_equal(&prevList, &currentList);
 
-        if (changed) {
+        struct nabtoshell_active_control_stream* sessionSyncSnapshot[MAX_CONTROL_STREAMS];
+        int sessionSyncCount = 0;
+        pthread_mutex_lock(&csl->streamListMutex);
+        struct nabtoshell_active_control_stream* sss = csl->activeStreams;
+        while (sss != NULL && sessionSyncCount < MAX_CONTROL_STREAMS) {
+            if (atomic_load(&sss->needsSessionSync) &&
+                !atomic_load(&sss->closing)) {
+                control_stream_retain(sss);
+                sessionSyncSnapshot[sessionSyncCount++] = sss;
+                atomic_store(&sss->needsSessionSync, false);
+            }
+            sss = sss->next;
+        }
+        pthread_mutex_unlock(&csl->streamListMutex);
+
+        if (changed || sessionSyncCount > 0) {
             size_t msgLen = 0;
             uint8_t* msg = encode_session_snapshot(&currentList, &msgLen);
             if (msg != NULL) {
-                broadcast_to_all(csl, msg, msgLen);
+                if (changed) {
+                    broadcast_to_all(csl, msg, msgLen);
+                } else {
+                    for (int i = 0; i < sessionSyncCount; i++) {
+                        send_to_stream(sessionSyncSnapshot[i], msg, msgLen);
+                    }
+                }
                 free(msg);
+            } else {
+                printf("Failed to encode control stream session snapshot" NEWLINE);
             }
+        }
+
+        for (int i = 0; i < sessionSyncCount; i++) {
+            control_stream_release_impl(sessionSyncSnapshot[i]);
+        }
+
+        if (changed) {
             prevList = currentList;
             hasPrev = true;
         }
@@ -520,62 +553,81 @@ static bool tmux_lists_equal(const struct nabtoshell_tmux_list* a,
 static uint8_t* encode_session_snapshot(const struct nabtoshell_tmux_list* list,
                                         size_t* outLen)
 {
-    uint8_t cborBuf[2048];
-    CborEncoder encoder;
-    cbor_encoder_init(&encoder, cborBuf, sizeof(cborBuf), 0);
+    size_t cborCap = 2048;
 
-    CborEncoder mapEncoder;
-    cbor_encoder_create_map(&encoder, &mapEncoder, 2);
+    while (cborCap <= MAX_SESSION_SNAPSHOT_CBOR) {
+        uint8_t* cborBuf = malloc(cborCap);
+        if (cborBuf == NULL) {
+            return NULL;
+        }
 
-    cbor_encode_text_stringz(&mapEncoder, "type");
-    cbor_encode_text_stringz(&mapEncoder, "sessions");
+        CborEncoder encoder;
+        cbor_encoder_init(&encoder, cborBuf, cborCap, 0);
 
-    cbor_encode_text_stringz(&mapEncoder, "sessions");
+        CborEncoder mapEncoder;
+        cbor_encoder_create_map(&encoder, &mapEncoder, 2);
 
-    CborEncoder arrayEncoder;
-    cbor_encoder_create_array(&mapEncoder, &arrayEncoder, list->count);
+        cbor_encode_text_stringz(&mapEncoder, "type");
+        cbor_encode_text_stringz(&mapEncoder, "sessions");
 
-    for (int i = 0; i < list->count; i++) {
-        CborEncoder sessionMap;
-        cbor_encoder_create_map(&arrayEncoder, &sessionMap, 4);
+        cbor_encode_text_stringz(&mapEncoder, "sessions");
 
-        cbor_encode_text_stringz(&sessionMap, "name");
-        cbor_encode_text_stringz(&sessionMap, list->sessions[i].name);
+        CborEncoder arrayEncoder;
+        cbor_encoder_create_array(&mapEncoder, &arrayEncoder, list->count);
 
-        cbor_encode_text_stringz(&sessionMap, "cols");
-        cbor_encode_uint(&sessionMap, list->sessions[i].cols);
+        for (int i = 0; i < list->count; i++) {
+            CborEncoder sessionMap;
+            cbor_encoder_create_map(&arrayEncoder, &sessionMap, 4);
 
-        cbor_encode_text_stringz(&sessionMap, "rows");
-        cbor_encode_uint(&sessionMap, list->sessions[i].rows);
+            cbor_encode_text_stringz(&sessionMap, "name");
+            cbor_encode_text_stringz(&sessionMap, list->sessions[i].name);
 
-        cbor_encode_text_stringz(&sessionMap, "attached");
-        cbor_encode_uint(&sessionMap, list->sessions[i].attached);
+            cbor_encode_text_stringz(&sessionMap, "cols");
+            cbor_encode_uint(&sessionMap, list->sessions[i].cols);
 
-        cbor_encoder_close_container(&arrayEncoder, &sessionMap);
+            cbor_encode_text_stringz(&sessionMap, "rows");
+            cbor_encode_uint(&sessionMap, list->sessions[i].rows);
+
+            cbor_encode_text_stringz(&sessionMap, "attached");
+            cbor_encode_uint(&sessionMap, list->sessions[i].attached);
+
+            cbor_encoder_close_container(&arrayEncoder, &sessionMap);
+        }
+
+        cbor_encoder_close_container(&mapEncoder, &arrayEncoder);
+        CborError err = cbor_encoder_close_container(&encoder, &mapEncoder);
+        size_t extra = cbor_encoder_get_extra_bytes_needed(&encoder);
+        if (err == CborNoError && extra == 0) {
+            size_t cborLen = cbor_encoder_get_buffer_size(&encoder, cborBuf);
+            if (cborLen >= 65536) {
+                free(cborBuf);
+                return NULL;
+            }
+
+            size_t totalLen = 4 + cborLen;
+            uint8_t* buf = malloc(totalLen);
+            if (buf == NULL) {
+                free(cborBuf);
+                return NULL;
+            }
+
+            uint32_t lenBE = htonl((uint32_t)cborLen);
+            memcpy(buf, &lenBE, 4);
+            memcpy(buf + 4, cborBuf, cborLen);
+            free(cborBuf);
+
+            *outLen = totalLen;
+            return buf;
+        }
+
+        free(cborBuf);
+        if (extra == 0 || cborCap + extra + 512 > MAX_SESSION_SNAPSHOT_CBOR) {
+            return NULL;
+        }
+        cborCap += extra + 512;
     }
 
-    cbor_encoder_close_container(&mapEncoder, &arrayEncoder);
-    CborError err = cbor_encoder_close_container(&encoder, &mapEncoder);
-
-    if (err != CborNoError || cbor_encoder_get_extra_bytes_needed(&encoder) > 0)
-        return NULL;
-
-    size_t cborLen = cbor_encoder_get_buffer_size(&encoder, cborBuf);
-
-    /* Allocate: 4-byte length prefix + CBOR payload */
-    size_t totalLen = 4 + cborLen;
-    uint8_t* buf = malloc(totalLen);
-    if (buf == NULL) {
-        return NULL;
-    }
-
-    /* Big-endian uint32 length prefix */
-    uint32_t lenBE = htonl((uint32_t)cborLen);
-    memcpy(buf, &lenBE, 4);
-    memcpy(buf + 4, cborBuf, cborLen);
-
-    *outLen = totalLen;
-    return buf;
+    return NULL;
 }
 
 /*

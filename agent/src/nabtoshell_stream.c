@@ -34,6 +34,7 @@ static void cleanup_active_stream(struct nabtoshell_active_stream* as);
 static void* stream_setup_thread(void* arg);
 static void* pty_reader_thread(void* arg);
 static void* stream_reader_thread(void* arg);
+static bool write_all_fd(int fd, const uint8_t* data, size_t len);
 
 static void start_stream_close_once(struct nabtoshell_active_stream* as)
 {
@@ -401,9 +402,7 @@ static void* stream_reader_thread(void* arg)
         }
 
         if (readLength > 0 && as->ptyFd >= 0) {
-            ssize_t written = write(as->ptyFd, buf, readLength);
-            (void)written;
-            if (written < 0) {
+            if (!write_all_fd(as->ptyFd, buf, readLength)) {
                 break;
             }
         }
@@ -412,6 +411,23 @@ static void* stream_reader_thread(void* arg)
     atomic_store(&as->closing, true);
     start_stream_close_once(as);
     return NULL;
+}
+
+static bool write_all_fd(int fd, const uint8_t* data, size_t len)
+{
+    size_t total = 0;
+    while (total < len) {
+        ssize_t written = write(fd, data + total, len - total);
+        if (written > 0) {
+            total += (size_t)written;
+            continue;
+        }
+        if (written < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+            continue;
+        }
+        return false;
+    }
+    return true;
 }
 
 /* PTY reader thread: reads from PTY and writes to Nabto stream. */

@@ -3,6 +3,7 @@
 #include <nabto/nabto_client.h>
 #include <cbor.h>
 
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -257,9 +258,13 @@ bool nabtoshell_coap_list_sessions(NabtoClientConnection* conn,
     }
 
     /* Parse CBOR array */
+    bool parseOk = true;
     CborParser parser;
     CborValue value;
-    cbor_parser_init((const uint8_t*)payload, payloadLen, 0, &parser, &value);
+    if (cbor_parser_init((const uint8_t*)payload, payloadLen, 0, &parser, &value) != CborNoError) {
+        nabto_client_coap_free(coap);
+        return false;
+    }
 
     if (!cbor_value_is_array(&value)) {
         nabto_client_coap_free(coap);
@@ -267,60 +272,107 @@ bool nabtoshell_coap_list_sessions(NabtoClientConnection* conn,
     }
 
     CborValue arr;
-    cbor_value_enter_container(&value, &arr);
+    if (cbor_value_enter_container(&value, &arr) != CborNoError) {
+        nabto_client_coap_free(coap);
+        return false;
+    }
 
     while (!cbor_value_at_end(&arr) &&
            list->count < NABTOSHELL_CLIENT_MAX_SESSIONS) {
         if (!cbor_value_is_map(&arr)) {
-            cbor_value_advance(&arr);
+            if (cbor_value_advance(&arr) != CborNoError) {
+                parseOk = false;
+                break;
+            }
             continue;
         }
 
         CborValue mapVal;
-        cbor_value_enter_container(&arr, &mapVal);
+        if (cbor_value_enter_container(&arr, &mapVal) != CborNoError) {
+            parseOk = false;
+            break;
+        }
 
         struct nabtoshell_client_session_info* info = &list->sessions[list->count];
+        bool validEntry = true;
 
         while (!cbor_value_at_end(&mapVal)) {
             if (!cbor_value_is_text_string(&mapVal)) {
-                cbor_value_advance(&mapVal);
-                cbor_value_advance(&mapVal);
+                if (cbor_value_advance(&mapVal) != CborNoError ||
+                    cbor_value_at_end(&mapVal) ||
+                    cbor_value_advance(&mapVal) != CborNoError) {
+                    validEntry = false;
+                    break;
+                }
                 continue;
             }
 
             char key[32];
-            size_t keyLen = sizeof(key);
-            cbor_value_copy_text_string(&mapVal, key, &keyLen, NULL);
-            cbor_value_advance(&mapVal);
+            size_t keyLen = sizeof(key) - 1;
+            if (cbor_value_copy_text_string(&mapVal, key, &keyLen, NULL) != CborNoError) {
+                validEntry = false;
+                break;
+            }
+            key[keyLen] = '\0';
+            if (cbor_value_advance(&mapVal) != CborNoError) {
+                validEntry = false;
+                break;
+            }
 
             if (strcmp(key, "name") == 0 && cbor_value_is_text_string(&mapVal)) {
-                size_t nameLen = sizeof(info->name);
-                cbor_value_copy_text_string(&mapVal, info->name, &nameLen, NULL);
+                size_t nameLen = sizeof(info->name) - 1;
+                if (cbor_value_copy_text_string(&mapVal, info->name, &nameLen, NULL) != CborNoError) {
+                    validEntry = false;
+                    break;
+                }
+                info->name[nameLen] = '\0';
             } else if (strcmp(key, "cols") == 0 &&
                        cbor_value_is_unsigned_integer(&mapVal)) {
                 uint64_t v;
-                cbor_value_get_uint64(&mapVal, &v);
+                if (cbor_value_get_uint64(&mapVal, &v) != CborNoError ||
+                    v > UINT16_MAX) {
+                    validEntry = false;
+                    break;
+                }
                 info->cols = (uint16_t)v;
             } else if (strcmp(key, "rows") == 0 &&
                        cbor_value_is_unsigned_integer(&mapVal)) {
                 uint64_t v;
-                cbor_value_get_uint64(&mapVal, &v);
+                if (cbor_value_get_uint64(&mapVal, &v) != CborNoError ||
+                    v > UINT16_MAX) {
+                    validEntry = false;
+                    break;
+                }
                 info->rows = (uint16_t)v;
             } else if (strcmp(key, "attached") == 0 &&
                        cbor_value_is_unsigned_integer(&mapVal)) {
                 uint64_t v;
-                cbor_value_get_uint64(&mapVal, &v);
+                if (cbor_value_get_uint64(&mapVal, &v) != CborNoError ||
+                    v > INT_MAX) {
+                    validEntry = false;
+                    break;
+                }
                 info->attached = (int)v;
             }
-            cbor_value_advance(&mapVal);
+            if (cbor_value_advance(&mapVal) != CborNoError) {
+                validEntry = false;
+                break;
+            }
         }
 
-        cbor_value_leave_container(&arr, &mapVal);
+        if (!validEntry) {
+            parseOk = false;
+            break;
+        }
+        if (cbor_value_leave_container(&arr, &mapVal) != CborNoError) {
+            parseOk = false;
+            break;
+        }
         list->count++;
     }
 
     nabto_client_coap_free(coap);
-    return true;
+    return parseOk;
 }
 
 bool nabtoshell_coap_get_status(NabtoClientConnection* conn,
@@ -356,45 +408,80 @@ bool nabtoshell_coap_get_status(NabtoClientConnection* conn,
     size_t payloadLen = 0;
     nabto_client_coap_get_response_payload(coap, &payload, &payloadLen);
 
+    bool parseOk = true;
     if (payload != NULL && payloadLen > 0) {
         CborParser parser;
         CborValue value;
-        cbor_parser_init((const uint8_t*)payload, payloadLen, 0, &parser, &value);
+        if (cbor_parser_init((const uint8_t*)payload, payloadLen, 0, &parser, &value) != CborNoError) {
+            nabto_client_coap_free(coap);
+            return false;
+        }
 
         if (cbor_value_is_map(&value)) {
             CborValue map;
-            cbor_value_enter_container(&value, &map);
+            if (cbor_value_enter_container(&value, &map) != CborNoError) {
+                nabto_client_coap_free(coap);
+                return false;
+            }
 
             while (!cbor_value_at_end(&map)) {
                 if (!cbor_value_is_text_string(&map)) {
-                    cbor_value_advance(&map);
-                    cbor_value_advance(&map);
+                    if (cbor_value_advance(&map) != CborNoError ||
+                        cbor_value_at_end(&map) ||
+                        cbor_value_advance(&map) != CborNoError) {
+                        parseOk = false;
+                        break;
+                    }
                     continue;
                 }
 
                 char key[32];
-                size_t keyLen = sizeof(key);
-                cbor_value_copy_text_string(&map, key, &keyLen, NULL);
-                cbor_value_advance(&map);
+                size_t keyLen = sizeof(key) - 1;
+                if (cbor_value_copy_text_string(&map, key, &keyLen, NULL) != CborNoError) {
+                    parseOk = false;
+                    break;
+                }
+                key[keyLen] = '\0';
+                if (cbor_value_advance(&map) != CborNoError) {
+                    parseOk = false;
+                    break;
+                }
 
                 if (strcmp(key, "version") == 0 &&
                     cbor_value_is_text_string(&map)) {
-                    size_t vLen = sizeof(info->version);
-                    cbor_value_copy_text_string(&map, info->version, &vLen, NULL);
+                    size_t vLen = sizeof(info->version) - 1;
+                    if (cbor_value_copy_text_string(&map, info->version, &vLen, NULL) != CborNoError) {
+                        parseOk = false;
+                        break;
+                    }
+                    info->version[vLen] = '\0';
                 } else if (strcmp(key, "active_sessions") == 0 &&
                            cbor_value_is_unsigned_integer(&map)) {
                     uint64_t v;
-                    cbor_value_get_uint64(&map, &v);
+                    if (cbor_value_get_uint64(&map, &v) != CborNoError ||
+                        v > INT_MAX) {
+                        parseOk = false;
+                        break;
+                    }
                     info->activeSessions = (int)v;
                 } else if (strcmp(key, "uptime_seconds") == 0 &&
                            cbor_value_is_unsigned_integer(&map)) {
-                    cbor_value_get_uint64(&map, &info->uptimeSeconds);
+                    if (cbor_value_get_uint64(&map, &info->uptimeSeconds) != CborNoError) {
+                        parseOk = false;
+                        break;
+                    }
                 }
-                cbor_value_advance(&map);
+                if (cbor_value_advance(&map) != CborNoError) {
+                    parseOk = false;
+                    break;
+                }
+            }
+            if (parseOk && cbor_value_leave_container(&value, &map) != CborNoError) {
+                parseOk = false;
             }
         }
     }
 
     nabto_client_coap_free(coap);
-    return true;
+    return parseOk;
 }

@@ -6,6 +6,7 @@
 
 #include <sys/ioctl.h>
 #include <signal.h>
+#include <string.h>
 
 #define NABTOSHELL_MAX_TERM_COLS 1000
 #define NABTOSHELL_MAX_TERM_ROWS 1000
@@ -51,30 +52,53 @@ static void handle_request(struct nabtoshell_coap_handler* handler,
     }
 
     CborValue map;
-    cbor_value_enter_container(&value, &map);
+    if (cbor_value_enter_container(&value, &map) != CborNoError) {
+        nabto_device_coap_error_response(request, 400, "Invalid CBOR payload");
+        return;
+    }
 
     uint64_t cols = 0, rows = 0;
     bool hasCols = false, hasRows = false;
 
     while (!cbor_value_at_end(&map)) {
         if (!cbor_value_is_text_string(&map)) {
-            cbor_value_advance(&map);
-            cbor_value_advance(&map);
+            if (cbor_value_advance(&map) != CborNoError ||
+                cbor_value_at_end(&map) ||
+                cbor_value_advance(&map) != CborNoError) {
+                nabto_device_coap_error_response(request, 400, "Invalid CBOR payload");
+                return;
+            }
             continue;
         }
         char keyBuf[32];
-        size_t keyLen = sizeof(keyBuf);
-        cbor_value_copy_text_string(&map, keyBuf, &keyLen, NULL);
-        cbor_value_advance(&map);
+        size_t keyLen = sizeof(keyBuf) - 1;
+        if (cbor_value_copy_text_string(&map, keyBuf, &keyLen, NULL) != CborNoError) {
+            nabto_device_coap_error_response(request, 400, "Invalid or oversized key");
+            return;
+        }
+        keyBuf[keyLen] = '\0';
+        if (cbor_value_advance(&map) != CborNoError) {
+            nabto_device_coap_error_response(request, 400, "Invalid CBOR payload");
+            return;
+        }
 
         if (strcmp(keyBuf, "cols") == 0 && cbor_value_is_unsigned_integer(&map)) {
-            cbor_value_get_uint64(&map, &cols);
+            if (cbor_value_get_uint64(&map, &cols) != CborNoError) {
+                nabto_device_coap_error_response(request, 400, "Invalid cols");
+                return;
+            }
             hasCols = true;
         } else if (strcmp(keyBuf, "rows") == 0 && cbor_value_is_unsigned_integer(&map)) {
-            cbor_value_get_uint64(&map, &rows);
+            if (cbor_value_get_uint64(&map, &rows) != CborNoError) {
+                nabto_device_coap_error_response(request, 400, "Invalid rows");
+                return;
+            }
             hasRows = true;
         }
-        cbor_value_advance(&map);
+        if (cbor_value_advance(&map) != CborNoError) {
+            nabto_device_coap_error_response(request, 400, "Invalid CBOR payload");
+            return;
+        }
     }
 
     if (!hasCols || !hasRows) {

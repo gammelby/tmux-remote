@@ -37,10 +37,6 @@ void nabtoshell_iam_create_default_state(NabtoDevice* device, struct nm_fs* file
 void nabtoshell_iam_create_open_state(NabtoDevice* device, struct nm_fs* file,
                                       const char* filename, struct nn_log* logger);
 
-char* nabtoshell_iam_create_pairing_string(struct nm_iam* iam,
-                                           const char* productId,
-                                           const char* deviceId);
-
 char* nabtoshell_iam_create_invite_pairing_string(struct nm_iam* iam,
                                                   const char* productId,
                                                   const char* deviceId,

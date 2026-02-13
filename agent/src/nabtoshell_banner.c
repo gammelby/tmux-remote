@@ -11,8 +11,7 @@
 
 #define NEWLINE "\n"
 
-void nabtoshell_print_banner(struct nabtoshell* app, const char* fingerprint,
-                             const char* pairingString)
+void nabtoshell_print_banner(struct nabtoshell* app, const char* fingerprint)
 {
     const char* productId = nabto_device_get_product_id(app->device);
     const char* deviceId = nabto_device_get_device_id(app->device);
@@ -68,7 +67,7 @@ void nabtoshell_print_banner(struct nabtoshell* app, const char* fingerprint,
         printf("#  sees your data." NEWLINE);
         printf("#" NEWLINE);
 
-        if (hasPendingInvite && pairingString == NULL) {
+        if (hasPendingInvite) {
             /* Invite pairing mode: show invite string */
             struct nm_iam_user* user = NULL;
             if (state != NULL) {
@@ -92,14 +91,6 @@ void nabtoshell_print_banner(struct nabtoshell* app, const char* fingerprint,
                 printf("#  it is invalidated and pairing is closed." NEWLINE);
                 printf("#" NEWLINE);
             }
-        } else if (pairingString != NULL) {
-            /* Open pairing mode */
-            printf("# -- Pairing --------------------------------------------" NEWLINE);
-            printf("#" NEWLINE);
-            printf("#  Open pairing (demo mode). Pairing string:" NEWLINE);
-            printf("#" NEWLINE);
-            printf("#  %s" NEWLINE, pairingString);
-            printf("#" NEWLINE);
         }
     } else {
         /* Users are paired */

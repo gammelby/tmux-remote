@@ -60,26 +60,53 @@ static void handle_request(struct nabtoshell_coap_handler* handler,
 
     while (!cbor_value_at_end(&map)) {
         if (!cbor_value_is_text_string(&map)) {
-            cbor_value_advance(&map);
-            cbor_value_advance(&map);
+            if (cbor_value_advance(&map) != CborNoError ||
+                cbor_value_at_end(&map) ||
+                cbor_value_advance(&map) != CborNoError) {
+                nabto_device_coap_error_response(request, 400, "Invalid CBOR payload");
+                return;
+            }
             continue;
         }
         char keyBuf[32];
-        size_t keyLen = sizeof(keyBuf);
-        cbor_value_copy_text_string(&map, keyBuf, &keyLen, NULL);
-        cbor_value_advance(&map);
+        size_t keyLen = sizeof(keyBuf) - 1;
+        if (cbor_value_copy_text_string(&map, keyBuf, &keyLen, NULL) != CborNoError) {
+            nabto_device_coap_error_response(request, 400, "Invalid or oversized key");
+            return;
+        }
+        keyBuf[keyLen] = '\0';
+        if (cbor_value_advance(&map) != CborNoError) {
+            nabto_device_coap_error_response(request, 400, "Invalid CBOR payload");
+            return;
+        }
 
         if (strcmp(keyBuf, "session") == 0 && cbor_value_is_text_string(&map)) {
-            size_t sLen = sizeof(sessionName);
-            cbor_value_copy_text_string(&map, sessionName, &sLen, NULL);
+            size_t sLen = sizeof(sessionName) - 1;
+            if (cbor_value_copy_text_string(&map, sessionName, &sLen, NULL) != CborNoError) {
+                nabto_device_coap_error_response(request, 400, "Invalid or oversized session");
+                return;
+            }
+            sessionName[sLen] = '\0';
         } else if (strcmp(keyBuf, "cols") == 0 && cbor_value_is_unsigned_integer(&map)) {
-            cbor_value_get_uint64(&map, &cols);
+            if (cbor_value_get_uint64(&map, &cols) != CborNoError) {
+                nabto_device_coap_error_response(request, 400, "Invalid cols");
+                return;
+            }
         } else if (strcmp(keyBuf, "rows") == 0 && cbor_value_is_unsigned_integer(&map)) {
-            cbor_value_get_uint64(&map, &rows);
+            if (cbor_value_get_uint64(&map, &rows) != CborNoError) {
+                nabto_device_coap_error_response(request, 400, "Invalid rows");
+                return;
+            }
         } else if (strcmp(keyBuf, "create") == 0 && cbor_value_is_boolean(&map)) {
-            cbor_value_get_boolean(&map, &createIfMissing);
+            if (cbor_value_get_boolean(&map, &createIfMissing) != CborNoError) {
+                nabto_device_coap_error_response(request, 400, "Invalid create flag");
+                return;
+            }
         }
-        cbor_value_advance(&map);
+        if (cbor_value_advance(&map) != CborNoError) {
+            nabto_device_coap_error_response(request, 400, "Invalid CBOR payload");
+            return;
+        }
     }
 
     if (strlen(sessionName) == 0) {

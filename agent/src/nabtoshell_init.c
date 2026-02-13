@@ -23,7 +23,7 @@
 #define NEWLINE "\n"
 
 static bool init_common(const char* homeDir, const char* productId,
-                        const char* deviceId, bool demoMode)
+                        const char* deviceId)
 {
     struct nm_fs fsImpl = nm_fs_posix_get_impl();
     char buffer[512];
@@ -128,55 +128,30 @@ static bool init_common(const char* homeDir, const char* productId,
     nabto_device_get_device_fingerprint(device, &fingerprint);
 
     /* Create IAM state */
-    if (demoMode) {
-        nabtoshell_iam_create_open_state(device, &fsImpl, iamStateFile, &logger);
-        printf(NEWLINE);
-        printf("WARNING: Demo mode enables open pairing. Anyone with the pairing" NEWLINE);
-        printf("password can gain terminal access. Do not use in production." NEWLINE);
-        printf(NEWLINE);
+    nabtoshell_iam_create_default_state(device, &fsImpl, iamStateFile, &logger, "owner");
 
-        /* Load the state to get pairing string */
-        char* str = NULL;
-        if (string_file_load(&fsImpl, iamStateFile, &str)) {
-            struct nm_iam_state* state = nm_iam_state_new();
-            if (nm_iam_serializer_state_load_json(state, str, &logger)) {
-                if (state->passwordOpenPassword != NULL && state->passwordOpenSct != NULL) {
-                    printf("Pairing string:" NEWLINE);
-                    printf("  p=%s,d=%s,pwd=%s,sct=%s" NEWLINE,
-                           pidBuf, didBuf,
-                           state->passwordOpenPassword,
-                           state->passwordOpenSct);
+    /* Load state back to get pairing string for owner */
+    char* str = NULL;
+    if (string_file_load(&fsImpl, iamStateFile, &str)) {
+        struct nm_iam_state* state = nm_iam_state_new();
+        if (nm_iam_serializer_state_load_json(state, str, &logger)) {
+            struct nm_iam_user* user = NULL;
+            NN_LLIST_FOREACH(user, &state->users) {
+                if (user->username != NULL &&
+                    strcmp(user->username, "owner") == 0) {
+                    break;
                 }
             }
-            nm_iam_state_free(state);
-            free(str);
-        }
-    } else {
-        nabtoshell_iam_create_default_state(device, &fsImpl, iamStateFile, &logger, "owner");
-
-        /* Load state back to get pairing string for owner */
-        char* str = NULL;
-        if (string_file_load(&fsImpl, iamStateFile, &str)) {
-            struct nm_iam_state* state = nm_iam_state_new();
-            if (nm_iam_serializer_state_load_json(state, str, &logger)) {
-                struct nm_iam_user* user = NULL;
-                NN_LLIST_FOREACH(user, &state->users) {
-                    if (user->username != NULL &&
-                        strcmp(user->username, "owner") == 0) {
-                        break;
-                    }
-                }
-                if (user != NULL && user->password != NULL && user->sct != NULL) {
-                    printf(NEWLINE);
-                    printf("Pairing string for initial user:" NEWLINE);
-                    printf("  p=%s,d=%s,u=owner,pwd=%s,sct=%s" NEWLINE,
-                           pidBuf, didBuf,
-                           user->password, user->sct);
-                }
+            if (user != NULL && user->password != NULL && user->sct != NULL) {
+                printf(NEWLINE);
+                printf("Pairing string for initial user:" NEWLINE);
+                printf("  p=%s,d=%s,u=owner,pwd=%s,sct=%s" NEWLINE,
+                       pidBuf, didBuf,
+                       user->password, user->sct);
             }
-            nm_iam_state_free(state);
-            free(str);
         }
+        nm_iam_state_free(state);
+        free(str);
     }
 
     printf(NEWLINE);
@@ -205,13 +180,17 @@ static bool init_common(const char* homeDir, const char* productId,
 bool nabtoshell_do_init(const char* homeDir, const char* productId,
                         const char* deviceId)
 {
-    return init_common(homeDir, productId, deviceId, false);
+    return init_common(homeDir, productId, deviceId);
 }
 
 bool nabtoshell_do_demo_init(const char* homeDir, const char* productId,
                              const char* deviceId)
 {
-    return init_common(homeDir, productId, deviceId, true);
+    (void)homeDir;
+    (void)productId;
+    (void)deviceId;
+    printf("--demo-init has been removed. Use --init (invite-only pairing)." NEWLINE);
+    return false;
 }
 
 bool nabtoshell_do_add_user(const char* homeDir, const char* username)

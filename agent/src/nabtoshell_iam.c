@@ -237,7 +237,6 @@ static bool load_iam_config(struct nabtoshell_iam* niam)
         struct nm_iam_policy* p = nm_iam_configuration_policy_new("Pairing");
         struct nm_iam_statement* s = nm_iam_configuration_policy_create_statement(p, NM_IAM_EFFECT_ALLOW);
         nm_iam_configuration_statement_add_action(s, "IAM:GetPairing");
-        nm_iam_configuration_statement_add_action(s, "IAM:PairingPasswordOpen");
         nm_iam_configuration_statement_add_action(s, "IAM:PairingPasswordInvite");
         nm_iam_configuration_add_policy(conf, p);
     }
@@ -272,32 +271,6 @@ static bool load_iam_config(struct nabtoshell_iam* niam)
     nm_iam_configuration_set_unpaired_role(conf, "Unpaired");
 
     return nm_iam_load_configuration(&niam->iam, conf);
-}
-
-char* nabtoshell_iam_create_pairing_string(struct nm_iam* iam,
-                                           const char* productId,
-                                           const char* deviceId)
-{
-    struct nm_iam_state* state = nm_iam_dump_state(iam);
-    if (state == NULL) {
-        return NULL;
-    }
-
-    /* For open pairing mode */
-    if (state->passwordOpenPairing && state->passwordOpenPassword != NULL &&
-        state->passwordOpenSct != NULL) {
-        char* pairStr = (char*)calloc(1, 512);
-        if (pairStr != NULL) {
-            snprintf(pairStr, 511, "p=%s,d=%s,pwd=%s,sct=%s",
-                     productId, deviceId,
-                     state->passwordOpenPassword, state->passwordOpenSct);
-        }
-        nm_iam_state_free(state);
-        return pairStr;
-    }
-
-    nm_iam_state_free(state);
-    return NULL;
 }
 
 char* nabtoshell_iam_create_invite_pairing_string(struct nm_iam* iam,

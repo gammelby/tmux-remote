@@ -19,6 +19,7 @@ struct nabtoshell_active_control_stream {
     pthread_mutex_t writeMutex;
     atomic_bool closing;
     atomic_bool needsPatternSync;
+    atomic_bool needsSessionSync;
     NabtoDeviceConnectionRef connectionRef;
     atomic_uint refCount;
     pthread_t readerThread;

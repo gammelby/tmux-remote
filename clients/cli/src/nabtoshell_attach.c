@@ -25,6 +25,7 @@ struct reader_thread_ctx {
 };
 
 static volatile sig_atomic_t sigwinch_received = 0;
+static bool write_all_fd(int fd, const uint8_t* data, size_t len);
 
 static void sigwinch_handler(int sig)
 {
@@ -49,13 +50,31 @@ static void* stream_reader_thread(void* arg)
         }
 
         if (readLen > 0) {
-            ssize_t w = write(STDOUT_FILENO, buf, readLen);
-            (void)w;
+            if (!write_all_fd(STDOUT_FILENO, buf, readLen)) {
+                break;
+            }
         }
     }
 
     atomic_store(ctx->done, true);
     return NULL;
+}
+
+static bool write_all_fd(int fd, const uint8_t* data, size_t len)
+{
+    size_t total = 0;
+    while (total < len) {
+        ssize_t written = write(fd, data + total, len - total);
+        if (written > 0) {
+            total += (size_t)written;
+            continue;
+        }
+        if (written < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+            continue;
+        }
+        return false;
+    }
+    return true;
 }
 
 /* Shared stream relay loop: open stream, set raw mode, relay stdin<->stream.

@@ -113,7 +113,8 @@ int main(int argc, char** argv)
         } else {
             make_directories(homeDir);
             if (args.demoInit) {
-                status = nabtoshell_do_demo_init(homeDir, args.productId, args.deviceId);
+                printf("--demo-init has been removed. Use --init (invite-only pairing)." NEWLINE);
+                status = false;
             } else {
                 status = nabtoshell_do_init(homeDir, args.productId, args.deviceId);
             }
@@ -278,14 +279,7 @@ bool run_agent(const struct args* args)
     char* deviceFingerprint = NULL;
     nabto_device_get_device_fingerprint(app.device, &deviceFingerprint);
 
-    char* pairingString = nabtoshell_iam_create_pairing_string(
-        &app.iam.iam,
-        nabto_device_get_product_id(app.device),
-        nabto_device_get_device_id(app.device));
-
-    nabtoshell_print_banner(&app, deviceFingerprint, pairingString);
-
-    free(pairingString);
+    nabtoshell_print_banner(&app, deviceFingerprint);
     nabto_device_string_free(deviceFingerprint);
 
     /* Device event listener and signal handling.
@@ -592,6 +586,7 @@ void load_pattern_configs(struct nabtoshell* app)
         return;
     }
 
+    bool versionSet = false;
     for (size_t i = 0; i < fileCount; i++) {
         char filePath[512];
         snprintf(filePath, sizeof(filePath), "%s/%s", dirPath, fileNames[i]);
@@ -627,8 +622,14 @@ void load_pattern_configs(struct nabtoshell* app)
             continue;
         }
 
-        if (merged->version == 0) {
+        if (!versionSet) {
             merged->version = cfg->version;
+            versionSet = true;
+        } else if (cfg->version != merged->version) {
+            printf("Warning: pattern config version mismatch in %s (expected %d, got %d; skipping file)" NEWLINE,
+                   filePath, merged->version, cfg->version);
+            nabtoshell_pattern_config_free(cfg);
+            continue;
         }
 
         for (int ai = 0; ai < cfg->agent_count; ai++) {
@@ -728,7 +729,7 @@ void print_help(void)
     printf("  -v, --version             Show version" NEWLINE);
     printf("  -H, --home-dir <dir>      Home directory (default: ~/.nabtoshell/)" NEWLINE);
     printf("      --init                Initialize configuration" NEWLINE);
-    printf("      --demo-init           Initialize with open pairing (for demos)" NEWLINE);
+    printf("      --demo-init           Removed (invite-only pairing enforced)" NEWLINE);
     printf("      --add-user <name>     Create a pairing invitation for a new user" NEWLINE);
     printf("      --remove-user <name>  Revoke access for a user" NEWLINE);
     printf("  -p, --product-id <id>     Product ID (used with --init)" NEWLINE);

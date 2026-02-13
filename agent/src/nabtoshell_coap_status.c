@@ -53,7 +53,11 @@ static void handle_request(struct nabtoshell_coap_handler* handler,
     cbor_encode_text_stringz(&mapEncoder, "uptime_seconds");
     cbor_encode_uint(&mapEncoder, uptime);
 
-    cbor_encoder_close_container(&encoder, &mapEncoder);
+    CborError err = cbor_encoder_close_container(&encoder, &mapEncoder);
+    if (err != CborNoError || cbor_encoder_get_extra_bytes_needed(&encoder) > 0) {
+        nabto_device_coap_error_response(request, 500, "Failed to encode status");
+        return;
+    }
 
     size_t cborLen = cbor_encoder_get_buffer_size(&encoder, cborBuf);
 

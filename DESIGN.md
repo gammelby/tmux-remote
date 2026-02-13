@@ -50,8 +50,8 @@ All require IAM authorization. Payloads use CBOR (content format 60).
 NabtoShell grants remote shell access. A compromise means an attacker can execute arbitrary commands as the user running the agent. This is equivalent to SSH access, and the security posture must match or exceed SSH.
 
 - **Single role: Owner.** Full access or no access. No "limited" roles. A multi-role model would be security theater for a remote shell.
-- **Password Invite pairing only.** A one-time password is generated per invitation and closed after use. No other pairing mode is ever enabled in normal operation.
-- **Every endpoint checks IAM.** CoAP handlers and stream listeners call `nm_iam_check_access()` before processing. Unpaired connections can only access pairing endpoints.
+- **Password Invite pairing only.** A one-time password is generated per invitation and closed after use. No other pairing mode is enabled.
+- **Every endpoint checks IAM.** CoAP handlers and stream listeners call `nabtoshell_iam_check_access()`/`nabtoshell_iam_check_access_ref()` before processing. Unpaired connections can only access pairing endpoints.
 - **DTLS with ECC.** All traffic is encrypted end-to-end by the Nabto platform. The basestation mediates connection setup but cannot decrypt traffic.
 
 ### Security Properties
@@ -78,8 +78,8 @@ The trust model is identical: both rely on a one-time key exchange followed by p
 
 The pairing flow is identical across all clients. The transport is the same (Nabto Client SDK); only the UI differs.
 
-1. On `--init`, the agent pre-creates an initial user with a generated one-time password and SCT.
-2. The agent prints the pairing string to stdout on startup.
+1. On `--init`, the agent pre-creates an initial owner invitation with a generated one-time password and SCT.
+2. The invite pairing string is printed during `--init` and shown on startup while no client has paired yet.
 3. The user copies it to their client (CLI command or mobile app paste).
 4. The client parses the pairing string, generates a keypair if needed, connects, and completes the PAKE-based key exchange. Public keys are exchanged and stored.
 5. The invitation is consumed. Pairing is now closed. No further clients can pair.
@@ -156,12 +156,7 @@ They will no longer be able to connect.
 
 #### `nabtoshell-agent --demo-init`
 
-Convenience mode for demos and testing. Enables Password Open Pairing (shared password, any number of clients). Prints a clear warning:
-
-```
-WARNING: Demo mode enables open pairing. Anyone with the pairing
-password can gain terminal access. Do not use in production.
-```
+Removed. The agent enforces invite-only pairing. Use `--init` for first setup and `--add-user` for additional one-time invitations.
 
 ### Agent Configuration Directory
 
@@ -169,7 +164,7 @@ password can gain terminal access. Do not use in production.
 ~/.nabtoshell/
   config/device.json          # Product ID, Device ID, server settings
   config/iam_config.json      # IAM policies, roles (static)
-  state/iam_state.json        # Paired users, pairing mode state (mutable)
+  state/iam_state.json        # Paired users and pending one-time invitations (mutable)
   keys/device.key             # Device private key
   patterns/*.json             # Pattern definitions
 ```
@@ -486,7 +481,7 @@ Each call to `feed()` processes one chunk of PTY output:
 {
   "type": "sessions",
   "sessions": [
-    {"name": "main", "cols": 80, "rows": 24, "attached": true}
+    {"name": "main", "cols": 80, "rows": 24, "attached": 1}
   ]
 }
 ```

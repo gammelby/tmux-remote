@@ -35,7 +35,7 @@ static void handle_request(struct nabtoshell_coap_handler* handler,
     nabtoshell_tmux_list_sessions(&list);
 
     /* Encode as CBOR array */
-    uint8_t cborBuf[2048];
+    uint8_t cborBuf[8192];
     CborEncoder encoder;
     cbor_encoder_init(&encoder, cborBuf, sizeof(cborBuf), 0);
 
@@ -61,7 +61,11 @@ static void handle_request(struct nabtoshell_coap_handler* handler,
         cbor_encoder_close_container(&arrayEncoder, &mapEncoder);
     }
 
-    cbor_encoder_close_container(&encoder, &arrayEncoder);
+    CborError err = cbor_encoder_close_container(&encoder, &arrayEncoder);
+    if (err != CborNoError || cbor_encoder_get_extra_bytes_needed(&encoder) > 0) {
+        nabto_device_coap_error_response(request, 500, "Failed to encode sessions");
+        return;
+    }
 
     size_t cborLen = cbor_encoder_get_buffer_size(&encoder, cborBuf);
 
