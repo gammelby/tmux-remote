@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Read SPEC.md before starting any work. It is the source of truth for architecture, protocol, security model, and design decisions.
+Read DESIGN.md before starting any work. It is the source of truth for architecture, protocol, security model, and design decisions.
 
 ## Project overview
 
@@ -8,10 +8,9 @@ NabtoShell is a secure remote terminal tool using Nabto Edge P2P connectivity. I
 
 The repo contains three components that share no source code:
 
-- `agent/` -- C, Nabto Embedded SDK (device side, serves terminal sessions)
+- `agent/` -- C, Nabto Embedded SDK (device side, serves terminal sessions, pattern detection)
 - `clients/cli/` -- C, Nabto Client SDK binary (client side, connects to agent)
-- `clients/ios/` -- Swift, NabtoEdgeClientSwift (client side, mobile terminal)
-- `patterns/` -- JSON pattern definitions for CLI tool overlays (client-side only)
+- `clients/ios/` -- Swift, NabtoEdgeClientSwift (client side, mobile terminal with pattern overlay UI)
 
 ## Build
 
@@ -42,9 +41,9 @@ Open `clients/ios/NabtoShell.xcodeproj` in Xcode. NabtoEdgeClientSwift is manage
 ## Architecture rules
 
 - The agent uses the **Nabto Embedded SDK** (open source, C). The clients use the **Nabto Client SDK** (binary release, C API). These are different SDKs. Do not mix them.
-- The agent is a generic PTY relay. It knows nothing about what runs in the terminal. Never add agent-side logic that depends on Claude Code, Codex, Aider, or any specific CLI tool.
-- Pattern detection for CLI tools is handled entirely on the client side via JSON pattern configs in `patterns/`. This is by design: see SPEC.md section 13 item 1 and 7.
-- Communication: Nabto Streams for terminal data (raw bidirectional byte pipe), CoAP for control messages (resize, session management). See SPEC.md sections 4.4 and 7.
+- The agent is a generic PTY relay. It knows nothing about what runs in the terminal. Never add agent-side logic that depends on Claude Code, Codex, Aider, or any specific CLI tool. Pattern definitions are external JSON, not compiled in.
+- Pattern detection runs on the agent side via a pipeline (ANSI stripper, rolling buffer, PCRE2 regex matcher, pattern engine). Matches are pushed to clients via the control stream (port 2) as CBOR events. The iOS client is a pure display layer for pattern events. See DESIGN.md section 7.
+- Communication: Nabto Streams for terminal data (port 1, raw bidirectional byte pipe) and control events (port 2, length-prefixed CBOR). CoAP for control messages (resize, session management). See DESIGN.md section 3.
 
 ## Security model
 
@@ -53,7 +52,7 @@ This is critical. NabtoShell grants remote shell access. A compromise means arbi
 - Single IAM role: Owner. Full access or no access. Do not add "limited" roles.
 - Password Invite Pairing only. Pairing is closed after each invitation is consumed. No open pairing modes in normal operation. `--demo-init` is the only exception and must print a warning.
 - Every CoAP endpoint and stream handler must call `nm_iam_check_access()` before processing. No exceptions.
-- See SPEC.md sections 4.5 and 9 for full details.
+- See DESIGN.md section 4 for full details.
 
 ## Code style
 
@@ -76,7 +75,9 @@ All endpoints require IAM authorization except pairing.
 
 ## Stream protocol
 
-Port 1. Raw bytes, no framing. Transparent PTY pipe. Terminal escape sequences are handled by the client (local terminal for CLI, SwiftTerm for iOS).
+Port 1: Raw bytes, no framing. Transparent PTY pipe. Terminal escape sequences are handled by the client (local terminal for CLI, SwiftTerm for iOS).
+
+Port 2: Control stream. Length-prefixed CBOR messages. Carries pattern match/dismiss events (agent to client), session state, and client dismiss messages (client to agent).
 
 ## File layout
 
@@ -94,30 +95,17 @@ clients/
     NabtoShell.xcodeproj/
     NabtoShell/
 
-patterns/
-  schema.json                    # JSON schema for pattern format
-  claude-code.json
-  codex.json
-  aider.json
-
-docs/
-SPEC.md
+DESIGN.md
 CLAUDE.md
 ```
 
 ## Development phase
 
-We are in **Phase 1: Agent + CLI Client**. Focus is:
-
-1. Agent with stream relay, CoAP endpoints, IAM integration
-2. CLI client with pair, connect, sessions, devices commands
-3. Goal: interactive tmux session between two machines over Nabto with proper authentication
-
-Do not work on iOS, pattern overlays, or multi-session tabs until Phase 1 is complete and tested.
+Phase 1 (agent + CLI client) and Phase 2a (iOS app with pattern overlays) are complete. Current work focuses on polish, testing, and publishing.
 
 ## Key references
 
-- SPEC.md (this repo): full product specification
+- DESIGN.md (this repo): full system architecture and design
 - Nabto Embedded SDK: https://github.com/nabto/nabto-embedded-sdk
 - Nabto Client SDK examples: https://github.com/nabto/nabto-client-sdk-examples
 - Nabto tcp_tunnel_device (IAM reference): in the embedded SDK repo under `examples/tcp_tunnel_device/`

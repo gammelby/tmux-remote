@@ -47,18 +47,228 @@ All require IAM authorization. Payloads use CBOR (content format 60).
 
 ## 4. Security Model
 
-NabtoShell grants remote shell access. A compromise means arbitrary command execution.
+NabtoShell grants remote shell access. A compromise means an attacker can execute arbitrary commands as the user running the agent. This is equivalent to SSH access, and the security posture must match or exceed SSH.
 
-- **Single role: Owner.** Full access or no access. No "limited" roles.
-- **Password Invite pairing only.** A one-time password is generated per invitation and closed after use.
-- **Every endpoint checks IAM.** CoAP handlers and stream listeners call `nm_iam_check_access()` before processing.
-- **DTLS with ECC.** All traffic is encrypted end-to-end by the Nabto platform.
+- **Single role: Owner.** Full access or no access. No "limited" roles. A multi-role model would be security theater for a remote shell.
+- **Password Invite pairing only.** A one-time password is generated per invitation and closed after use. No other pairing mode is ever enabled in normal operation.
+- **Every endpoint checks IAM.** CoAP handlers and stream listeners call `nm_iam_check_access()` before processing. Unpaired connections can only access pairing endpoints.
+- **DTLS with ECC.** All traffic is encrypted end-to-end by the Nabto platform. The basestation mediates connection setup but cannot decrypt traffic.
+
+### Security Properties
+
+- **End-to-end encryption**: DTLS with ECC key pairs. The Nabto basestation mediates connection setup (hole punching, relay fallback) but cannot decrypt traffic.
+- **Mutual authentication**: After pairing, both client and device authenticate each other via public key fingerprints on every connection. No passwords are transmitted or stored after the initial pairing.
+- **Zero exposed ports**: The device agent opens no listening TCP or UDP ports. All connectivity is outbound to the Nabto basestation. No attack surface for port scanners.
+- **One-time pairing passwords**: Pairing passwords are single-use. After a client pairs, the password is invalidated on the device. A leaked pairing string that has already been used is worthless.
+- **PTY isolation**: The PTY is spawned as the user running the agent. tmux session access is limited to that user's sessions. The agent does not run as root.
+
+### Comparison with SSH
+
+| Property | SSH | NabtoShell |
+|----------|-----|------------|
+| Key exchange | `ssh-keygen` + copy public key to server | Pairing string (one-time password for PAKE key exchange) |
+| Authentication | Public key or password per connection | Public key (after initial pairing) |
+| Encryption | AES/ChaCha20 over TCP | DTLS with ECC over UDP |
+| Network requirements | Open port 22, firewall rules, possibly dynamic DNS | None. Outbound UDP only. |
+| NAT traversal | Requires port forwarding or relay (ngrok, etc.) | Built-in P2P hole punching with relay fallback |
+
+The trust model is identical: both rely on a one-time key exchange followed by public key authentication. NabtoShell's pairing is arguably more user-friendly than SSH's `ssh-copy-id` workflow, while providing the same cryptographic guarantees.
+
+### Pairing Flow
+
+The pairing flow is identical across all clients. The transport is the same (Nabto Client SDK); only the UI differs.
+
+1. On `--init`, the agent pre-creates an initial user with a generated one-time password and SCT.
+2. The agent prints the pairing string to stdout on startup.
+3. The user copies it to their client (CLI command or mobile app paste).
+4. The client parses the pairing string, generates a keypair if needed, connects, and completes the PAKE-based key exchange. Public keys are exchanged and stored.
+5. The invitation is consumed. Pairing is now closed. No further clients can pair.
+6. To add another device, run `nabtoshell-agent --add-user <name>` at the server terminal.
+
+### Agent CLI
+
+#### `nabtoshell-agent --init`
+
+Interactive first-time setup:
+
+```
+$ nabtoshell-agent --init
+No configuration found. Creating initial setup.
+
+Product ID: pr-xxxxxxxx
+Device ID:  de-yyyyyyyy
+
+Generated device keypair.
+Fingerprint: 08c955a5f7505f16f03bc3e3e0db89ff56ce571e0dd6be153c5bae9174d62ac6
+
+Register this fingerprint in the Nabto Cloud Console before starting.
+
+Configuration written to ~/.nabtoshell/
+```
+
+#### Normal startup (no users paired yet)
+
+```
+$ nabtoshell-agent
+
+######## NabtoShell ########
+# Product ID:     pr-xxxxxxxx
+# Device ID:      de-yyyyyyyy
+# Fingerprint:    08c955a5...
+# Version:        0.1.0
+#
+#  No users paired yet. Pair your phone by copying
+#  this string into the NabtoShell app:
+#
+#  p=pr-xxxxxxxx,d=de-yyyyyyyy,u=owner,pwd=CbAHaqpKKrhK,sct=TUfe3n3hhhM9
+#
+#  This is a one-time pairing password. After you pair,
+#  it is invalidated and pairing is closed.
+#
+######## Waiting for pairing... ########
+```
+
+#### `nabtoshell-agent --add-user <name>`
+
+Creates a one-time invitation for an additional client:
+
+```
+$ nabtoshell-agent --add-user tablet
+Created invitation for user 'tablet'.
+
+Copy this string into the NabtoShell app on the new device:
+
+  p=pr-xxxxxxxx,d=de-yyyyyyyy,u=tablet,pwd=xK9mRtYwZp3n,sct=Hf7kL2nQwR4s
+
+This invitation can only be used once. Pairing will close
+again after this device pairs.
+```
+
+#### `nabtoshell-agent --remove-user <name>`
+
+Revokes access for a paired user or cancels an unused invitation:
+
+```
+$ nabtoshell-agent --remove-user tablet
+Removed user 'tablet'. Their public key has been deleted.
+They will no longer be able to connect.
+```
+
+#### `nabtoshell-agent --demo-init`
+
+Convenience mode for demos and testing. Enables Password Open Pairing (shared password, any number of clients). Prints a clear warning:
+
+```
+WARNING: Demo mode enables open pairing. Anyone with the pairing
+password can gain terminal access. Do not use in production.
+```
+
+### Agent Configuration Directory
+
+```
+~/.nabtoshell/
+  config/device.json          # Product ID, Device ID, server settings
+  config/iam_config.json      # IAM policies, roles (static)
+  state/iam_state.json        # Paired users, pairing mode state (mutable)
+  keys/device.key             # Device private key
+  patterns/*.json             # Pattern definitions
+```
+
+## 5. CLI Client
+
+A command-line client for connecting to a NabtoShell agent from another computer. Uses the Nabto Client SDK (binary release). The CLI client is the simplest client and serves as the primary driver for developing and testing the agent. It is a transparent byte pipe: connects, opens a Nabto stream, and relays bytes between the stream and the local terminal's stdin/stdout.
+
+### Usage
+
+```
+nabtoshell pair <pairing-string>                    # One-time pairing
+nabtoshell attach <device-name> [session]            # Attach to existing tmux session
+nabtoshell create <device-name> [session] [command]  # Create new session, optionally run command
+nabtoshell sessions <device-name>                    # List tmux sessions
+nabtoshell devices                                   # List saved devices
+nabtoshell rename <device-name> <new-name>           # Rename a saved device
+```
+
+Aliases: `a` for `attach`, `c`/`n`/`new`/`new-session` for `create`.
+
+### Attach/Create Flow
+
+1. Look up device bookmark from `~/.nabtoshell-client/` by name.
+2. Create a Nabto client connection with stored product ID, device ID, client private key, and SCT.
+3. `nabto_client_connection_connect()`.
+4. Send `POST /terminal/attach` or `POST /terminal/create` (CoAP) with session name and terminal dimensions from `ioctl(TIOCGWINSZ)`.
+5. Open stream on port 1 via `nabto_client_stream_open()`.
+6. Set local terminal to raw mode (`cfmakeraw`).
+7. Enter relay loop: `select()` on stdin and the Nabto stream fd (or use the async API with futures).
+8. Handle `SIGWINCH`: send `POST /terminal/resize` via CoAP when the local terminal is resized.
+9. On stream close or EOF, restore terminal and exit.
+
+### Client Configuration
+
+```
+~/.nabtoshell-client/
+  client.key              # Client private key
+  devices.json            # Saved device bookmarks
+```
+
+## 6. iOS App
+
+### Pairing (First Connection)
+
+1. User taps "Add Device" and pastes the pairing string from the agent's terminal.
+2. App parses the string to extract product ID, device ID, pairing password, and SCT.
+3. App generates a client keypair (if not already created) and connects to the device.
+4. PAKE-based key exchange using the one-time password. Public keys are exchanged.
+5. Device stores the client's public key fingerprint; app stores the device bookmark.
+6. Device appears in the app's device list.
+
+### Subsequent Connections
+
+1. On the device list, the app connects to saved devices in the background.
+2. The control stream (port 2) delivers session lists automatically. The app displays available tmux sessions per device.
+3. User taps a session to enter the terminal view.
+4. App sends `POST /terminal/attach` with session name and current terminal dimensions.
+5. App opens a stream via `connection.createStream()` and calls `stream.open()`.
+6. Stream relay begins: `stream.readSome()` feeds into SwiftTerm, SwiftTerm key events go to `stream.write()`.
+
+### Connection Lifecycle
+
+```
+Client                              Device Agent
+  |                                      |
+  |---- Connect (Nabto) --------------->|
+  |                                      |
+  |---- Control Stream Open (port 2) -->|
+  |<--- sessions list (CBOR, periodic) -|  (background, every 2s)
+  |                                      |
+  |  (user selects a session)            |
+  |                                      |
+  |---- POST /terminal/attach --------->|
+  |     {session: "main", cols, rows}    |
+  |<--- 2.01 Created -------------------|
+  |                                      |
+  |---- Data Stream Open (port 1) ----->|
+  |                                      | <- forkpty() + tmux attach
+  |<--- stream data (PTY output) -------|
+  |---- stream data (keystrokes) ------>|
+  |         ... interactive session ...  |
+  |                                      |
+  |<--- pattern_match (port 2, CBOR) ---|  (when prompt detected)
+  |---- pattern_dismiss (port 2) ------>|  (user tapped action)
+  |                                      |
+  |---- POST /terminal/resize --------->|  (on device rotation)
+  |     {cols: 120, rows: 40}            |
+  |<--- 2.04 Changed -------------------|
+  |                                      |
+  |---- Stream Close ------------------>|
+  |---- Connection Close --------------->|
+```
 
 ---
 
-## 5. Pattern Recognition System
+## 7. Pattern Recognition System
 
-### 5.1 Design Goals
+### 7.1 Design Goals
 
 1. Detect interactive prompts from CLI tools (Claude Code, Aider, Codex) running inside the terminal.
 2. Present mobile-friendly overlay buttons so the user can respond without typing.
@@ -66,7 +276,7 @@ NabtoShell grants remote shell access. A compromise means arbitrary command exec
 4. Keep the agent tool-agnostic: pattern definitions are external JSON, not compiled in.
 5. Minimize control stream traffic: one match event when a prompt appears, one dismiss when it leaves. No cycling.
 
-### 5.2 Architecture Overview
+### 7.2 Architecture Overview
 
 Pattern detection runs on the **agent side**, not the client. The agent processes raw PTY output through a multi-stage pipeline that strips ANSI escape sequences, buffers plain text, and evaluates regex patterns. When a match is found, the agent encodes the match (with resolved action buttons) as CBOR and pushes it to the iOS client via the control stream. The client displays an overlay and, when the user taps a button, sends the keystroke to the data stream and a dismiss message back to the agent on the control stream.
 
@@ -94,7 +304,7 @@ PTY output (raw bytes)
 
 The iOS client receives pre-resolved matches from the agent and displays them. It contains no client-side pattern detection logic.
 
-### 5.3 Pattern Configuration
+### 7.3 Pattern Configuration
 
 Patterns are defined in JSON files loaded from `~/.nabtoshell/patterns/` at agent startup. Each file defines one or more agents, each with an ordered list of patterns.
 
@@ -137,13 +347,13 @@ Patterns are defined in JSON files loaded from `~/.nabtoshell/patterns/` at agen
 
 For `numbered_menu`, `action_template.keys` contains `{number}` which is substituted with the item number (e.g., `{number}` becomes `1`, `2`, `3`).
 
-### 5.4 Agent Pipeline: Stage by Stage
+### 7.4 Agent Pipeline: Stage by Stage
 
 #### Stage 1: ANSI Stripper
 
 **Files:** `nabtoshell_ansi_stripper.h`, `nabtoshell_ansi_stripper.c`
 
-A byte-level state machine that removes terminal escape sequences while preserving text layout for regex matching. Five states:
+A byte-level state machine that removes terminal escape sequences while preserving text layout for regex matching. Six states:
 
 | State | Trigger | Behavior |
 |-------|---------|----------|
@@ -152,6 +362,7 @@ A byte-level state machine that removes terminal escape sequences while preservi
 | `ESCAPE_INTERMEDIATE` | ESC + byte in 0x20-0x2F | Consume until final byte (handles `ESC(B` charset select, which is 3 bytes not 2) |
 | `CSI` | `ESC [` | Consume parameter bytes; on final byte, emit whitespace for cursor movement |
 | `OSC` | `ESC ]` | Consume until `ESC \` or BEL (0x07) |
+| `OSC_ESCAPE` | ESC inside OSC | Await `\` to terminate OSC (two-byte `ESC \` terminator) |
 
 **Cursor movement to whitespace conversion:**
 
@@ -242,7 +453,7 @@ Each call to `feed()` processes one chunk of PTY output:
 
 **User dismiss:** `dismiss()` sets `dismissed = true`, `user_dismissed = true`, and records `dismissed_at_position`. This is called when the client sends a `pattern_dismiss` message back via the control stream.
 
-### 5.5 Control Stream Protocol
+### 7.5 Control Stream Protocol
 
 **Port:** 2 (separate Nabto stream from the data port)
 
@@ -289,7 +500,7 @@ Each call to `feed()` processes one chunk of PTY output:
 
 A dedicated reader thread per control stream reads these messages. On `pattern_dismiss`, it looks up the data stream by `connectionRef` and calls `nabtoshell_pattern_engine_dismiss()`.
 
-### 5.6 iOS Client Integration
+### 7.6 iOS Client Integration
 
 #### Server Event Path (production)
 
@@ -336,7 +547,7 @@ In `#if DEBUG` builds with `StubNabtoService`, scripted pattern events (match/di
 
 The iOS app shows an "Agent" pill in the terminal toolbar. The user can select an agent (Claude Code, Aider, etc.) or turn detection off. Selection is persisted in `UserDefaults` per device ID and restored on reconnect.
 
-### 5.7 Pattern Overlay UI
+### 7.7 Pattern Overlay UI
 
 **File:** `PatternOverlayView.swift`
 
@@ -348,7 +559,7 @@ A bottom sheet anchored to the terminal view. Rendered differently per pattern t
 
 The overlay disables hit testing on the terminal view underneath (`allowsHitTesting(patternEngine.activeMatch == nil)`), so the user must interact with the overlay or dismiss it.
 
-### 5.8 Tuning Constants and Rationale
+### 7.8 Tuning Constants and Rationale
 
 | Constant | Value | Why |
 |----------|-------|-----|
@@ -360,7 +571,7 @@ The overlay disables hit testing on the terminal view underneath (`allowsHitTest
 | Auto dismiss cooldown (1500 = AUTO_DISMISS) | Shorter | The prompt already left the window, so less cooldown needed |
 | Server match debounce (2 seconds) | Calendar time on client | After user taps, suppresses agent-side re-matches during the brief period when the TUI is redrawing the new prompt |
 
-### 5.9 Key Design Decisions
+### 7.9 Key Design Decisions
 
 **1. Agent-side detection, not client-side.**
 The agent has access to the raw PTY output before it is sent to the client. Running detection on the agent means the iOS client does not need to bundle PCRE2 or implement a pattern matching pipeline. Pattern configs are managed in one place, and the control stream carries pre-resolved action buttons. The iOS client is a pure display layer for pattern events.
@@ -383,7 +594,7 @@ User dismiss requires 4000 chars of cooldown to flush the old prompt text comple
 **7. No force-dismiss.**
 An earlier design had a `MAX_MATCH_AGE` that force-dismissed after N chars regardless of whether the prompt was still visible. This caused dismiss/rematch/dismiss cycling through the control stream, flooding the iOS client with events. The current design uses age-reset: if the prompt is still in the scan window during an auto-dismiss check, the match age is simply reset. The match persists as long as the prompt is actively being redrawn.
 
-### 5.10 Threading Model
+### 7.10 Threading Model
 
 #### Agent Threads per Data Stream
 
@@ -406,31 +617,54 @@ The PTY reader thread is where pattern detection happens. It calls `nabtoshell_p
 
 All Nabto SDK callbacks execute on the SDK's core event loop thread. Blocking in a callback freezes the entire SDK. All blocking work (PTY I/O, thread joins, contested mutexes) is deferred to dedicated threads.
 
-## 6. File Layout
+## 8. File Layout
 
 ```
 agent/
   src/
+    main.c                               # Entry point, argument parsing
     nabtoshell.h / .c                    # Main app struct, startup, shutdown
+    nabtoshell_banner.h / .c             # Startup banner output
+    nabtoshell_device.h / .c             # Nabto device setup
+    nabtoshell_init.h / .c               # --init, --add-user, --remove-user logic
     nabtoshell_stream.h / .c             # Data stream (port 1), PTY relay
     nabtoshell_control_stream.h / .c     # Control stream (port 2), events
+    nabtoshell_tmux.h / .c               # tmux session utilities
     nabtoshell_pattern_engine.h / .c     # Match lifecycle, feed pipeline
     nabtoshell_pattern_matcher.h / .c    # PCRE2 regex, action extraction
     nabtoshell_pattern_config.h / .c     # JSON config parsing
-    nabtoshell_pattern_cbor.h            # CBOR encode/decode for matches
+    nabtoshell_pattern_cbor.h / .c       # CBOR encode/decode for matches
     nabtoshell_ansi_stripper.h / .c      # Terminal escape removal
     nabtoshell_rolling_buffer.h / .c     # Circular text buffer
     nabtoshell_coap_handler.h / .c       # CoAP endpoint scaffold
+    nabtoshell_coap_attach.c             # POST /terminal/attach handler
+    nabtoshell_coap_create.c             # POST /terminal/create handler
+    nabtoshell_coap_resize.c             # POST /terminal/resize handler
+    nabtoshell_coap_sessions.c           # GET /terminal/sessions handler
+    nabtoshell_coap_status.c             # GET /terminal/status handler
     nabtoshell_iam.h / .c                # IAM integration
     nabtoshell_session.h / .c            # Session map
   tests/
-    test_pattern_engine.c                # 21 tests for pattern pipeline
+    test_pattern_engine.c                # Pattern engine pipeline tests
+    test_ansi_stripper.c                 # ANSI stripper tests
+    test_pattern_matcher.c               # Pattern matcher tests
+    test_pattern_config.c                # Config parsing tests
+    test_pattern_broadcast.c             # Control stream broadcast tests
+    test_pattern_routing.c               # Pattern routing tests
 
 clients/
   cli/
     src/                                 # CLI client (C)
   ios/
     NabtoShell/
+      App/
+        NabtoShellApp.swift              # App entry point
+        RootView.swift                   # Root navigation
+        AppState.swift                   # App-wide state
+      Models/
+        DeviceBookmark.swift             # Device bookmark model
+        PairingInfo.swift                # Pairing string parser
+        SessionInfo.swift                # Session data model
       Patterns/
         PatternEngine.swift              # Server event handler, agent selection
         PatternMatch.swift               # Match data model
@@ -440,10 +674,21 @@ clients/
         ConnectionManager.swift          # Control stream read/write
         CBORHelpers.swift                # CBOR encoding/decoding
         NabtoService.swift               # Nabto connection management
+        BookmarkStore.swift              # Device bookmark persistence
+        KeychainService.swift            # Keychain for private keys
+        ReconnectLogic.swift             # Auto-reconnect on disconnect
+        ResumeLogic.swift                # Session resume on app foreground
+        AppLog.swift                     # Debug logging
       Views/
+        DeviceListView.swift             # Device list and session selection
+        PairingView.swift                # Pairing string input
+        WelcomeView.swift                # First-launch welcome
         TerminalScreen.swift             # Main terminal view, pattern integration
         PatternOverlayView.swift         # Action button overlay
         TerminalViewWrapper.swift        # SwiftTerm UIKit bridge
+        KeyboardAccessoryView.swift      # Terminal keyboard accessory bar
+      Resources/
+        patterns.json                    # Bundled pattern definitions
 
 ~/.nabtoshell/
   config/device.json                     # Product/device IDs
