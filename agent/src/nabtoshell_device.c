@@ -11,6 +11,7 @@ void nabtoshell_init(struct nabtoshell* app)
 
 void nabtoshell_deinit(struct nabtoshell* app)
 {
+    nabtoshell_session_map_deinit(&app->sessionMap);
     if (app->patternConfig) {
         nabtoshell_pattern_config_free(app->patternConfig);
         app->patternConfig = NULL;

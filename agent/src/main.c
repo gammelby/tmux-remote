@@ -86,6 +86,10 @@ static char* get_default_home_dir(void);
 static bool run_agent(const struct args* args);
 static void load_pattern_configs(struct nabtoshell* app);
 static void print_help(void);
+static int cmp_str_ptr(const void* a, const void* b);
+static bool merge_agent_into_config(nabtoshell_pattern_config* merged,
+                                    nabtoshell_agent_config* agent);
+static bool has_duplicate_pattern_ids(const nabtoshell_agent_config* agent);
 
 int main(int argc, char** argv)
 {
@@ -533,7 +537,7 @@ char* get_default_home_dir(void)
 }
 
 /*
- * Load pattern config files from ~/.nabtoshell/patterns/*.json.
+ * Load pattern config files from ~/.nabtoshell/patterns/ (all .json files).
  */
 void load_pattern_configs(struct nabtoshell* app)
 {
@@ -545,6 +549,13 @@ void load_pattern_configs(struct nabtoshell* app)
         return;
     }
 
+    if (app->patternConfig != NULL) {
+        nabtoshell_pattern_config_free(app->patternConfig);
+        app->patternConfig = NULL;
+    }
+
+    char** fileNames = NULL;
+    size_t fileCount = 0;
     struct dirent* entry;
     while ((entry = readdir(dir)) != NULL) {
         size_t nameLen = strlen(entry->d_name);
@@ -552,8 +563,38 @@ void load_pattern_configs(struct nabtoshell* app)
             continue;
         }
 
+        char** newFiles = realloc(fileNames, sizeof(char*) * (fileCount + 1));
+        if (newFiles == NULL) {
+            continue;
+        }
+        fileNames = newFiles;
+        fileNames[fileCount] = strdup(entry->d_name);
+        if (fileNames[fileCount] == NULL) {
+            continue;
+        }
+        fileCount++;
+    }
+    closedir(dir);
+
+    if (fileCount == 0) {
+        free(fileNames);
+        return;
+    }
+
+    qsort(fileNames, fileCount, sizeof(char*), cmp_str_ptr);
+
+    nabtoshell_pattern_config* merged = calloc(1, sizeof(nabtoshell_pattern_config));
+    if (merged == NULL) {
+        for (size_t i = 0; i < fileCount; i++) {
+            free(fileNames[i]);
+        }
+        free(fileNames);
+        return;
+    }
+
+    for (size_t i = 0; i < fileCount; i++) {
         char filePath[512];
-        snprintf(filePath, sizeof(filePath), "%s/%s", dirPath, entry->d_name);
+        snprintf(filePath, sizeof(filePath), "%s/%s", dirPath, fileNames[i]);
 
         FILE* f = fopen(filePath, "r");
         if (f == NULL) {
@@ -570,6 +611,10 @@ void load_pattern_configs(struct nabtoshell* app)
         }
 
         char* json = malloc(fsize + 1);
+        if (json == NULL) {
+            fclose(f);
+            continue;
+        }
         size_t readLen = fread(json, 1, fsize, f);
         fclose(f);
         json[readLen] = '\0';
@@ -582,20 +627,94 @@ void load_pattern_configs(struct nabtoshell* app)
             continue;
         }
 
-        if (app->patternConfig != NULL) {
-            nabtoshell_pattern_config_free(app->patternConfig);
+        if (merged->version == 0) {
+            merged->version = cfg->version;
         }
-        app->patternConfig = cfg;
-        printf("Loaded pattern config: %s (%d agents)" NEWLINE,
-               entry->d_name, cfg->agent_count);
+
+        for (int ai = 0; ai < cfg->agent_count; ai++) {
+            nabtoshell_agent_config* agent = &cfg->agents[ai];
+
+            if (has_duplicate_pattern_ids(agent)) {
+                printf("Warning: duplicate pattern ids for agent '%s' in %s (skipping agent)" NEWLINE,
+                       agent->id ? agent->id : "(null)", filePath);
+                continue;
+            }
+
+            if (!merge_agent_into_config(merged, agent)) {
+                printf("Warning: duplicate or invalid agent '%s' in %s (skipping agent)" NEWLINE,
+                       agent->id ? agent->id : "(null)", filePath);
+            }
+        }
+
+        nabtoshell_pattern_config_free(cfg);
     }
 
-    closedir(dir);
+    for (size_t i = 0; i < fileCount; i++) {
+        free(fileNames[i]);
+    }
+    free(fileNames);
 
-    if (app->patternConfig != NULL) {
+    if (merged->agent_count > 0) {
+        app->patternConfig = merged;
         printf("Pattern config loaded (%d agents), activates per-session" NEWLINE,
-               app->patternConfig->agent_count);
+               merged->agent_count);
+    } else {
+        nabtoshell_pattern_config_free(merged);
     }
+}
+
+static int cmp_str_ptr(const void* a, const void* b)
+{
+    const char* const* sa = a;
+    const char* const* sb = b;
+    return strcmp(*sa, *sb);
+}
+
+static bool merge_agent_into_config(nabtoshell_pattern_config* merged,
+                                    nabtoshell_agent_config* agent)
+{
+    if (merged == NULL || agent == NULL || agent->id == NULL) {
+        return false;
+    }
+
+    for (int i = 0; i < merged->agent_count; i++) {
+        if (merged->agents[i].id != NULL &&
+            strcmp(merged->agents[i].id, agent->id) == 0) {
+            return false;
+        }
+    }
+
+    nabtoshell_agent_config* newAgents = realloc(
+        merged->agents, sizeof(nabtoshell_agent_config) * (merged->agent_count + 1));
+    if (newAgents == NULL) {
+        return false;
+    }
+    merged->agents = newAgents;
+    merged->agents[merged->agent_count] = *agent;
+    merged->agent_count++;
+
+    memset(agent, 0, sizeof(*agent));
+    return true;
+}
+
+static bool has_duplicate_pattern_ids(const nabtoshell_agent_config* agent)
+{
+    if (agent == NULL) {
+        return true;
+    }
+    for (int i = 0; i < agent->pattern_count; i++) {
+        const char* id = agent->patterns[i].id;
+        if (id == NULL) {
+            return true;
+        }
+        for (int j = i + 1; j < agent->pattern_count; j++) {
+            if (agent->patterns[j].id != NULL &&
+                strcmp(id, agent->patterns[j].id) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 void print_help(void)

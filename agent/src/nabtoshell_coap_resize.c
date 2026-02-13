@@ -7,6 +7,15 @@
 #include <sys/ioctl.h>
 #include <signal.h>
 
+#define NABTOSHELL_MAX_TERM_COLS 1000
+#define NABTOSHELL_MAX_TERM_ROWS 1000
+
+static bool valid_terminal_size(uint64_t cols, uint64_t rows)
+{
+    return cols >= 1 && cols <= NABTOSHELL_MAX_TERM_COLS &&
+           rows >= 1 && rows <= NABTOSHELL_MAX_TERM_ROWS;
+}
+
 static void handle_request(struct nabtoshell_coap_handler* handler,
                            NabtoDeviceCoapRequest* request);
 
@@ -73,6 +82,11 @@ static void handle_request(struct nabtoshell_coap_handler* handler,
         return;
     }
 
+    if (!valid_terminal_size(cols, rows)) {
+        nabto_device_coap_error_response(request, 400, "Invalid terminal size");
+        return;
+    }
+
     /* Find the PTY fd for this connection and resize it */
     NabtoDeviceConnectionRef ref = nabto_device_coap_request_get_connection_ref(request);
     int ptyFd = nabtoshell_stream_get_pty_fd(&app->streamListener, ref);
@@ -85,12 +99,7 @@ static void handle_request(struct nabtoshell_coap_handler* handler,
         ioctl(ptyFd, TIOCSWINSZ, &ws);
 
         /* Also update session map dimensions */
-        struct nabtoshell_session_entry* entry =
-            nabtoshell_session_find(&app->sessionMap, ref);
-        if (entry != NULL) {
-            entry->cols = (uint16_t)cols;
-            entry->rows = (uint16_t)rows;
-        }
+        nabtoshell_session_update_size(&app->sessionMap, ref, (uint16_t)cols, (uint16_t)rows);
     }
 
     nabto_device_coap_response_set_code(request, 204);

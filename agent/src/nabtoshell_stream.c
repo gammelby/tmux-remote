@@ -277,19 +277,18 @@ static void stream_accepted(NabtoDeviceFuture* future, NabtoDeviceError ec,
     }
 
     /* Look up session target */
-    struct nabtoshell_session_entry* entry =
-        nabtoshell_session_find(&as->app->sessionMap, ref);
-    if (entry == NULL) {
+    struct nabtoshell_session_entry entry;
+    if (!nabtoshell_session_get(&as->app->sessionMap, ref, &entry)) {
         printf("No session target set for connection, closing stream" NEWLINE);
         start_stream_close_once(as);
         return;
     }
 
     /* Copy session target and do setup off the SDK callback thread. */
-    strncpy(as->sessionName, entry->sessionName, sizeof(as->sessionName) - 1);
+    strncpy(as->sessionName, entry.sessionName, sizeof(as->sessionName) - 1);
     as->sessionName[sizeof(as->sessionName) - 1] = '\0';
-    as->sessionCols = entry->cols;
-    as->sessionRows = entry->rows;
+    as->sessionCols = entry.cols;
+    as->sessionRows = entry.rows;
 
     if (pthread_create(&as->setupThread, NULL, stream_setup_thread, as) != 0) {
         printf("Failed to create stream setup thread" NEWLINE);

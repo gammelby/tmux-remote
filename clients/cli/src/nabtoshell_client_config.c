@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -52,7 +54,10 @@ void nabtoshell_config_deinit(struct nabtoshell_client_config* config)
 
 bool nabtoshell_config_ensure_dirs(struct nabtoshell_client_config* config)
 {
-    mkdir(config->configDir, 0700);
+    if (mkdir(config->configDir, 0700) != 0 && errno != EEXIST) {
+        return false;
+    }
+    chmod(config->configDir, 0700);
     return true;
 }
 
@@ -64,6 +69,7 @@ bool nabtoshell_config_load_devices(struct nabtoshell_client_config* config)
     if (json == NULL) {
         return true; /* No devices file yet, that's OK */
     }
+    chmod(config->devicesFile, S_IRUSR | S_IWUSR);
 
     cJSON* root = cJSON_Parse(json);
     free(json);
@@ -176,6 +182,7 @@ bool nabtoshell_config_load_or_create_key(struct nabtoshell_client_config* confi
     /* Try to load existing key */
     char* key = read_file(config->keyFile);
     if (key != NULL) {
+        chmod(config->keyFile, S_IRUSR | S_IWUSR);
         *privateKey = key;
         return true;
     }
@@ -234,8 +241,15 @@ static char* read_file(const char* path)
 
 static bool write_file(const char* path, const char* content)
 {
-    FILE* f = fopen(path, "w");
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    if (fd < 0) {
+        return false;
+    }
+    (void)fchmod(fd, S_IRUSR | S_IWUSR);
+
+    FILE* f = fdopen(fd, "w");
     if (f == NULL) {
+        close(fd);
         return false;
     }
 

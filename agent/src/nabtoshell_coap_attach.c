@@ -8,6 +8,15 @@
 #include <string.h>
 #include <stdio.h>
 
+#define NABTOSHELL_MAX_TERM_COLS 1000
+#define NABTOSHELL_MAX_TERM_ROWS 1000
+
+static bool valid_terminal_size(uint64_t cols, uint64_t rows)
+{
+    return cols >= 1 && cols <= NABTOSHELL_MAX_TERM_COLS &&
+           rows >= 1 && rows <= NABTOSHELL_MAX_TERM_ROWS;
+}
+
 static void handle_request(struct nabtoshell_coap_handler* handler,
                            NabtoDeviceCoapRequest* request);
 
@@ -75,6 +84,11 @@ static void handle_request(struct nabtoshell_coap_handler* handler,
 
     if (strlen(sessionName) == 0) {
         nabto_device_coap_error_response(request, 400, "Missing session name");
+        return;
+    }
+
+    if (!valid_terminal_size(cols, rows)) {
+        nabto_device_coap_error_response(request, 400, "Invalid terminal size");
         return;
     }
 

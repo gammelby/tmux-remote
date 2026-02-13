@@ -1,4 +1,5 @@
 #include "nabtoshell_client_util.h"
+#include "3rdparty/cjson/cJSON.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,14 +61,10 @@ bool nabtoshell_parse_pairing_string(const char* str,
 
     /* Validate required fields */
     if (strlen(info->productId) == 0 || strlen(info->deviceId) == 0 ||
-        strlen(info->password) == 0 || strlen(info->sct) == 0) {
-        printf("Invalid pairing string: missing required fields (p, d, pwd, sct)\n");
+        strlen(info->username) == 0 || strlen(info->password) == 0 ||
+        strlen(info->sct) == 0) {
+        printf("Invalid pairing string: missing required fields (p, d, u, pwd, sct)\n");
         return false;
-    }
-
-    /* Username defaults to "owner" if not provided (open pairing) */
-    if (strlen(info->username) == 0) {
-        strncpy(info->username, "owner", sizeof(info->username) - 1);
     }
 
     return true;
@@ -78,41 +75,21 @@ char* nabtoshell_build_connection_options(const char* productId,
                                           const char* privateKey,
                                           const char* sct)
 {
-    /* JSON-escape the private key (PEM contains newlines) */
-    size_t keyLen = strlen(privateKey);
-    char* escaped = (char*)malloc(keyLen * 2 + 3);
-    if (escaped == NULL) {
+    cJSON* root = cJSON_CreateObject();
+    if (root == NULL) {
         return NULL;
     }
 
-    char* dst = escaped;
-    *dst++ = '"';
-    for (size_t i = 0; i < keyLen; i++) {
-        switch (privateKey[i]) {
-        case '\n': *dst++ = '\\'; *dst++ = 'n'; break;
-        case '\r': *dst++ = '\\'; *dst++ = 'r'; break;
-        case '"':  *dst++ = '\\'; *dst++ = '"'; break;
-        case '\\': *dst++ = '\\'; *dst++ = '\\'; break;
-        default:   *dst++ = privateKey[i]; break;
-        }
-    }
-    *dst++ = '"';
-    *dst = '\0';
-
-    size_t totalSize = strlen(escaped) + strlen(productId) + strlen(deviceId)
-                       + strlen(sct) + 128;
-    char* json = (char*)malloc(totalSize);
-    if (json == NULL) {
-        free(escaped);
+    if (cJSON_AddStringToObject(root, "ProductId", productId) == NULL ||
+        cJSON_AddStringToObject(root, "DeviceId", deviceId) == NULL ||
+        cJSON_AddStringToObject(root, "PrivateKey", privateKey) == NULL ||
+        cJSON_AddStringToObject(root, "ServerConnectToken", sct) == NULL) {
+        cJSON_Delete(root);
         return NULL;
     }
 
-    snprintf(json, totalSize,
-             "{\"ProductId\":\"%s\",\"DeviceId\":\"%s\","
-             "\"PrivateKey\":%s,"
-             "\"ServerConnectToken\":\"%s\"}",
-             productId, deviceId, escaped, sct);
-    free(escaped);
+    char* json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
     return json;
 }
 

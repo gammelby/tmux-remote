@@ -93,7 +93,8 @@ struct PairingView: View {
 
     private var canPair: Bool {
         if showAdvanced {
-            return !productId.isEmpty && !deviceId.isEmpty && !password.isEmpty && !sct.isEmpty
+            return !productId.isEmpty && !deviceId.isEmpty && !username.isEmpty &&
+                !password.isEmpty && !sct.isEmpty
         }
         return !pairingString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -109,7 +110,7 @@ struct PairingView: View {
             info = PairingInfo(
                 productId: productId,
                 deviceId: deviceId,
-                username: username.isEmpty ? "owner" : username,
+                username: username,
                 password: password,
                 sct: sct
             )

@@ -25,8 +25,8 @@ struct PairingInfo {
               let sct = fields["sct"] else {
             return nil
         }
-
         let username = fields["u"] ?? "owner"
+        guard !username.isEmpty else { return nil }
 
         return PairingInfo(
             productId: productId,

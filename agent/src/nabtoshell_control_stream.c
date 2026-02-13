@@ -515,7 +515,7 @@ static bool tmux_lists_equal(const struct nabtoshell_tmux_list* a,
  * Encode a session list as a length-prefixed CBOR message:
  *   [4 bytes: big-endian uint32 payload length][N bytes: CBOR]
  *
- * CBOR format: {"sessions": [{name, cols, rows, attached}, ...]}
+ * CBOR format: {"type":"sessions","sessions":[{name, cols, rows, attached}, ...]}
  */
 static uint8_t* encode_session_snapshot(const struct nabtoshell_tmux_list* list,
                                         size_t* outLen)
@@ -525,7 +525,10 @@ static uint8_t* encode_session_snapshot(const struct nabtoshell_tmux_list* list,
     cbor_encoder_init(&encoder, cborBuf, sizeof(cborBuf), 0);
 
     CborEncoder mapEncoder;
-    cbor_encoder_create_map(&encoder, &mapEncoder, 1);
+    cbor_encoder_create_map(&encoder, &mapEncoder, 2);
+
+    cbor_encode_text_stringz(&mapEncoder, "type");
+    cbor_encode_text_stringz(&mapEncoder, "sessions");
 
     cbor_encode_text_stringz(&mapEncoder, "sessions");
 

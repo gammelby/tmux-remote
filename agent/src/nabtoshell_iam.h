@@ -5,6 +5,7 @@
 #include <modules/iam/nm_iam_state.h>
 #include <nabto/nabto_device.h>
 #include <nn/log.h>
+#include <pthread.h>
 
 struct nm_fs;
 
@@ -14,6 +15,12 @@ struct nabtoshell_iam {
     NabtoDevice* device;
     char* iamStateFile;
     struct nm_fs* file;
+    pthread_mutex_t saveMutex;
+    pthread_cond_t saveCond;
+    pthread_t saveThread;
+    bool saveThreadStarted;
+    bool saveStop;
+    struct nm_iam_state* pendingState;
 };
 
 void nabtoshell_iam_init(struct nabtoshell_iam* niam, NabtoDevice* device,

@@ -20,14 +20,7 @@ static void nabtoshell_iam_state_changed(struct nm_iam* iam, void* userData);
 static bool load_iam_config(struct nabtoshell_iam* niam);
 static void save_iam_state(struct nm_fs* file, const char* filename,
                            struct nm_iam_state* state, struct nn_log* logger);
-static void* save_iam_state_thread(void* data);
-
-struct save_iam_state_job {
-    struct nm_fs* file;
-    char* filename;
-    struct nm_iam_state* state;
-    struct nn_log* logger;
-};
+static void* save_iam_state_worker(void* data);
 
 void nabtoshell_iam_init(struct nabtoshell_iam* niam, NabtoDevice* device,
                          struct nm_fs* file, const char* iamStateFile,
@@ -38,6 +31,18 @@ void nabtoshell_iam_init(struct nabtoshell_iam* niam, NabtoDevice* device,
     niam->iamStateFile = strdup(iamStateFile);
     niam->file = file;
     niam->device = device;
+    pthread_mutex_init(&niam->saveMutex, NULL);
+    pthread_cond_init(&niam->saveCond, NULL);
+    niam->saveThreadStarted = false;
+    niam->saveStop = false;
+    niam->pendingState = NULL;
+
+    if (pthread_create(&niam->saveThread, NULL, save_iam_state_worker, niam) == 0) {
+        niam->saveThreadStarted = true;
+    } else {
+        printf("Failed to start IAM state saver worker" NEWLINE);
+    }
+
     nm_iam_init(&niam->iam, device, logger);
     load_iam_config(niam);
     nm_iam_set_state_changed_callback(&niam->iam, nabtoshell_iam_state_changed, niam);
@@ -46,6 +51,23 @@ void nabtoshell_iam_init(struct nabtoshell_iam* niam, NabtoDevice* device,
 void nabtoshell_iam_deinit(struct nabtoshell_iam* niam)
 {
     nm_iam_deinit(&niam->iam);
+
+    pthread_mutex_lock(&niam->saveMutex);
+    niam->saveStop = true;
+    pthread_cond_signal(&niam->saveCond);
+    pthread_mutex_unlock(&niam->saveMutex);
+
+    if (niam->saveThreadStarted) {
+        pthread_join(niam->saveThread, NULL);
+        niam->saveThreadStarted = false;
+    }
+
+    if (niam->pendingState != NULL) {
+        nm_iam_state_free(niam->pendingState);
+        niam->pendingState = NULL;
+    }
+    pthread_cond_destroy(&niam->saveCond);
+    pthread_mutex_destroy(&niam->saveMutex);
     free(niam->iamStateFile);
 }
 
@@ -58,30 +80,19 @@ static void nabtoshell_iam_state_changed(struct nm_iam* iam, void* userData)
         return;
     }
 
-    struct save_iam_state_job* job =
-        (struct save_iam_state_job*)calloc(1, sizeof(struct save_iam_state_job));
-    if (job == NULL) {
+    if (!niam->saveThreadStarted) {
+        save_iam_state(niam->file, niam->iamStateFile, state, niam->logger);
         nm_iam_state_free(state);
-        return;
-    }
-    job->file = niam->file;
-    job->filename = strdup(niam->iamStateFile);
-    job->state = state;
-    job->logger = niam->logger;
-    if (job->filename == NULL) {
-        nm_iam_state_free(state);
-        free(job);
         return;
     }
 
-    pthread_t t;
-    if (pthread_create(&t, NULL, save_iam_state_thread, job) == 0) {
-        pthread_detach(t);
-    } else {
-        nm_iam_state_free(state);
-        free(job->filename);
-        free(job);
+    pthread_mutex_lock(&niam->saveMutex);
+    if (niam->pendingState != NULL) {
+        nm_iam_state_free(niam->pendingState);
     }
+    niam->pendingState = state;
+    pthread_cond_signal(&niam->saveCond);
+    pthread_mutex_unlock(&niam->saveMutex);
 }
 
 static void save_iam_state(struct nm_fs* file, const char* filename,
@@ -99,13 +110,29 @@ static void save_iam_state(struct nm_fs* file, const char* filename,
     nm_iam_serializer_string_free(str);
 }
 
-static void* save_iam_state_thread(void* data)
+static void* save_iam_state_worker(void* data)
 {
-    struct save_iam_state_job* job = (struct save_iam_state_job*)data;
-    save_iam_state(job->file, job->filename, job->state, job->logger);
-    nm_iam_state_free(job->state);
-    free(job->filename);
-    free(job);
+    struct nabtoshell_iam* niam = data;
+    while (true) {
+        struct nm_iam_state* state = NULL;
+        pthread_mutex_lock(&niam->saveMutex);
+        while (niam->pendingState == NULL && !niam->saveStop) {
+            pthread_cond_wait(&niam->saveCond, &niam->saveMutex);
+        }
+        if (niam->pendingState != NULL) {
+            state = niam->pendingState;
+            niam->pendingState = NULL;
+        } else if (niam->saveStop) {
+            pthread_mutex_unlock(&niam->saveMutex);
+            break;
+        }
+        pthread_mutex_unlock(&niam->saveMutex);
+
+        if (state != NULL) {
+            save_iam_state(niam->file, niam->iamStateFile, state, niam->logger);
+            nm_iam_state_free(state);
+        }
+    }
     return NULL;
 }
 

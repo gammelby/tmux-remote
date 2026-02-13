@@ -5,7 +5,6 @@
 #include "nabtoshell_client_coap.h"
 
 #include <nabto/nabto_client.h>
-#include <cbor.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -140,49 +139,11 @@ int nabtoshell_cmd_pair(int argc, char** argv)
     printf("Completing pairing...\n");
 
     if (!nabtoshell_coap_pair_password_invite(conn, client, info.username)) {
-        /* Try password-open pairing as fallback (for demo mode) */
-        NabtoClientCoap* coap = nabto_client_coap_new(conn, "POST",
-                                                       "/iam/pairing/password-open");
-        if (coap != NULL) {
-            uint8_t cborBuf[128];
-            CborEncoder encoder;
-            cbor_encoder_init(&encoder, cborBuf, sizeof(cborBuf), 0);
-
-            CborEncoder map;
-            cbor_encoder_create_map(&encoder, &map, 1);
-            cbor_encode_text_stringz(&map, "Username");
-            cbor_encode_text_stringz(&map, info.username);
-            cbor_encoder_close_container(&encoder, &map);
-            size_t cborLen = cbor_encoder_get_buffer_size(&encoder, cborBuf);
-
-            nabto_client_coap_set_request_payload(coap,
-                NABTO_CLIENT_COAP_CONTENT_FORMAT_APPLICATION_CBOR, cborBuf, cborLen);
-
-            future = nabto_client_future_new(client);
-            nabto_client_coap_execute(coap, future);
-            ec = nabto_client_future_wait(future);
-            nabto_client_future_free(future);
-
-            uint16_t statusCode = 0;
-            if (ec == NABTO_CLIENT_EC_OK) {
-                nabto_client_coap_get_response_status_code(coap, &statusCode);
-            }
-            nabto_client_coap_free(coap);
-
-            if (ec != NABTO_CLIENT_EC_OK || statusCode < 200 || statusCode >= 300) {
-                printf("Pairing failed.\n");
-                nabto_client_connection_free(conn);
-                nabto_client_free(client);
-                nabtoshell_config_deinit(&config);
-                return 1;
-            }
-        } else {
-            printf("Pairing failed.\n");
-            nabto_client_connection_free(conn);
-            nabto_client_free(client);
-            nabtoshell_config_deinit(&config);
-            return 1;
-        }
+        printf("Pairing failed. Ensure the invitation is valid and unused.\n");
+        nabto_client_connection_free(conn);
+        nabto_client_free(client);
+        nabtoshell_config_deinit(&config);
+        return 1;
     }
 
     /* Get device fingerprint */

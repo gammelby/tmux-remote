@@ -383,7 +383,7 @@ The stripper maintains a `pendingUTF8[4]` buffer. When a chunk ends with an inco
 **Other transformations:**
 - TAB (0x09): replaced with 4 spaces
 - Control characters (0x00-0x08, 0x0B-0x0C, 0x0E-0x1F): stripped
-- CR (0x0D): stripped (only LF used for line breaks)
+- CR (0x0D): normalized to LF (line breaks use LF)
 
 #### Stage 2: Rolling Buffer
 

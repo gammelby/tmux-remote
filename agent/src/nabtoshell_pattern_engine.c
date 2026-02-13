@@ -6,6 +6,9 @@
 #include <ctype.h>
 
 #define NEWLINE "\n"
+#define PATTERN_DEBUG_LOG 0
+#define PATTERN_LOG(...) \
+    do { if (PATTERN_DEBUG_LOG) printf(__VA_ARGS__); } while (0)
 
 void nabtoshell_pattern_engine_init(nabtoshell_pattern_engine *e)
 {
@@ -73,9 +76,9 @@ void nabtoshell_pattern_engine_load_config(nabtoshell_pattern_engine *e,
 void nabtoshell_pattern_engine_select_agent(nabtoshell_pattern_engine *e,
                                              const char *agent_id)
 {
-    printf("[Pattern] select_agent: %s, config=%s" NEWLINE,
-           agent_id ? agent_id : "NULL",
-           e->config ? "loaded" : "NULL");
+    PATTERN_LOG("[Pattern] select_agent: %s, config=%s" NEWLINE,
+                agent_id ? agent_id : "NULL",
+                e->config ? "loaded" : "NULL");
     nabtoshell_pattern_match *notify_copy = NULL;
     bool should_notify = false;
 
@@ -97,11 +100,11 @@ void nabtoshell_pattern_engine_select_agent(nabtoshell_pattern_engine *e,
         if (e->config) {
             const nabtoshell_agent_config *ac = nabtoshell_pattern_config_find_agent(e->config, agent_id);
             if (ac) {
-                printf("[Pattern] select_agent: found agent '%s' with %d patterns" NEWLINE,
-                       agent_id, ac->pattern_count);
+                PATTERN_LOG("[Pattern] select_agent: found agent '%s' with %d patterns" NEWLINE,
+                            agent_id, ac->pattern_count);
                 nabtoshell_pattern_matcher_load(&e->matcher, ac->patterns, ac->pattern_count);
             } else {
-                printf("[Pattern] select_agent: agent '%s' NOT FOUND in config" NEWLINE, agent_id);
+                PATTERN_LOG("[Pattern] select_agent: agent '%s' NOT FOUND in config" NEWLINE, agent_id);
                 nabtoshell_pattern_matcher_reset(&e->matcher);
             }
         }
@@ -159,11 +162,11 @@ void nabtoshell_pattern_engine_feed(nabtoshell_pattern_engine *e,
 
     /* Periodic logging: every ~2000 chars of total input */
     if (e->buffer.total_appended % 2000 < stripped_len) {
-        printf("[Pattern] engine_feed: total=%zu, stripped=%zu, agent=%s, match=%s, dismissed=%d" NEWLINE,
-               e->buffer.total_appended, stripped_len,
-               e->active_agent ? e->active_agent : "NULL",
-               e->active_match ? e->active_match->id : "NULL",
-               e->dismissed);
+        PATTERN_LOG("[Pattern] engine_feed: total=%zu, stripped=%zu, agent=%s, match=%s, dismissed=%d" NEWLINE,
+                    e->buffer.total_appended, stripped_len,
+                    e->active_agent ? e->active_agent : "NULL",
+                    e->active_match ? e->active_match->id : "NULL",
+                    e->dismissed);
     }
 
     /* Auto-detect agent from buffered text if none selected yet.
@@ -243,10 +246,10 @@ void nabtoshell_pattern_engine_feed(nabtoshell_pattern_engine *e,
             nabtoshell_pattern_match *check = nabtoshell_pattern_matcher_match(&e->matcher, tail, tail_len, e->buffer.total_appended);
             if (check && strcmp(check->id, e->active_match->id) == 0 &&
                 check->action_count > e->active_match->action_count) {
-                printf("[Pattern] engine_feed: upgrade match=%s, actions %d->%d" NEWLINE,
-                       e->active_match->id,
-                       e->active_match->action_count,
-                       check->action_count);
+                PATTERN_LOG("[Pattern] engine_feed: upgrade match=%s, actions %d->%d" NEWLINE,
+                            e->active_match->id,
+                            e->active_match->action_count,
+                            check->action_count);
                 nabtoshell_pattern_match_free(e->active_match);
                 e->active_match = check;
                 check = NULL;
@@ -281,10 +284,10 @@ void nabtoshell_pattern_engine_feed(nabtoshell_pattern_engine *e,
                  * If the rescan found more actions (items arrived across
                  * feeds), upgrade the active match and notify. */
                 if (check->action_count > e->active_match->action_count) {
-                    printf("[Pattern] engine_feed: upgrade match=%s, actions %d->%d" NEWLINE,
-                           e->active_match->id,
-                           e->active_match->action_count,
-                           check->action_count);
+                    PATTERN_LOG("[Pattern] engine_feed: upgrade match=%s, actions %d->%d" NEWLINE,
+                                e->active_match->id,
+                                e->active_match->action_count,
+                                check->action_count);
                     nabtoshell_pattern_match_free(e->active_match);
                     e->active_match = check;
                     check = NULL;  /* prevent double-free below */
@@ -294,11 +297,11 @@ void nabtoshell_pattern_engine_feed(nabtoshell_pattern_engine *e,
                 } else {
                     e->active_match->match_position = e->buffer.total_appended;
                 }
-                printf("[Pattern] engine_feed: age-reset match=%s, actions=%d, chars_since=%zu" NEWLINE,
-                       e->active_match->id, e->active_match->action_count, chars_since_match);
+                PATTERN_LOG("[Pattern] engine_feed: age-reset match=%s, actions=%d, chars_since=%zu" NEWLINE,
+                            e->active_match->id, e->active_match->action_count, chars_since_match);
             } else {
-                printf("[Pattern] engine_feed: auto-dismiss old=%s, chars_since=%zu, rescan_len=%zu" NEWLINE,
-                       e->active_match->id, chars_since_match, tail_len);
+                PATTERN_LOG("[Pattern] engine_feed: auto-dismiss old=%s, chars_since=%zu, rescan_len=%zu" NEWLINE,
+                            e->active_match->id, chars_since_match, tail_len);
                 nabtoshell_pattern_match_free(e->active_match);
                 e->active_match = NULL;
                 should_notify = true;
@@ -323,18 +326,13 @@ void nabtoshell_pattern_engine_feed(nabtoshell_pattern_engine *e,
         const char *tail = nabtoshell_rolling_buffer_tail(&e->buffer, PATTERN_ENGINE_MATCH_WINDOW, &tail_len);
         nabtoshell_pattern_match *new_match = nabtoshell_pattern_matcher_match(&e->matcher, tail, tail_len, e->buffer.total_appended);
         if (new_match) {
-            printf("[Pattern] engine_feed: new match id=%s, type=%d, actions=%d" NEWLINE,
-                   new_match->id, new_match->pattern_type, new_match->action_count);
+            PATTERN_LOG("[Pattern] engine_feed: new match id=%s, type=%d, actions=%d" NEWLINE,
+                        new_match->id, new_match->pattern_type, new_match->action_count);
             e->active_match = new_match;
             should_notify = true;
             notify_copy = nabtoshell_pattern_match_copy(e->active_match);
         } else if (e->buffer.total_appended % 2000 < stripped_len) {
-            /* Periodically dump buffer tail when no match found */
-            size_t dump_len = tail_len < 300 ? tail_len : 300;
-            const char *dump_start = tail + tail_len - dump_len;
-            printf("[Pattern] engine_feed: NO MATCH, tail_len=%zu, last %zu chars: [", tail_len, dump_len);
-            fwrite(dump_start, 1, dump_len, stdout);
-            printf("]" NEWLINE);
+            PATTERN_LOG("[Pattern] engine_feed: no match, tail_len=%zu" NEWLINE, tail_len);
         }
     }
 
@@ -342,8 +340,8 @@ void nabtoshell_pattern_engine_feed(nabtoshell_pattern_engine *e,
     if (heap_allocated) free(stripped);
 
     if (should_notify && e->on_change) {
-        printf("[Pattern] engine_feed: firing on_change, match=%s" NEWLINE,
-               notify_copy ? notify_copy->id : "NULL(dismiss)");
+        PATTERN_LOG("[Pattern] engine_feed: firing on_change, match=%s" NEWLINE,
+                    notify_copy ? notify_copy->id : "NULL(dismiss)");
         e->on_change(notify_copy, e->on_change_user_data);
     }
     nabtoshell_pattern_match_free(notify_copy);

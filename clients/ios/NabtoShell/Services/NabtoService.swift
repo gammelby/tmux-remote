@@ -134,10 +134,7 @@ class NabtoService {
 
             let paired = try await coapPairPasswordInvite(conn: conn, username: info.username)
             if !paired {
-                let openPaired = try await coapPairPasswordOpen(conn: conn, username: info.username)
-                if !openPaired {
-                    throw NabtoError.pairingFailed("The invitation may have already been used.")
-                }
+                throw NabtoError.pairingFailed("The invitation may have already been used.")
             }
 
             let fingerprint = try conn.getDeviceFingerprintHex()
@@ -165,15 +162,6 @@ class NabtoService {
 
     private func coapPairPasswordInvite(conn: Connection, username: String) async throws -> Bool {
         let coap = try conn.createCoapRequest(method: "POST", path: "/iam/pairing/password-invite")
-        let cbor: CBOR = .map([.utf8String("Username"): .utf8String(username)])
-        let payload = Data(cbor.encode())
-        try coap.setRequestPayload(contentFormat: ContentFormat.APPLICATION_CBOR.rawValue, data: payload)
-        let response = try await coap.executeAsync()
-        return response.status >= 200 && response.status < 300
-    }
-
-    private func coapPairPasswordOpen(conn: Connection, username: String) async throws -> Bool {
-        let coap = try conn.createCoapRequest(method: "POST", path: "/iam/pairing/password-open")
         let cbor: CBOR = .map([.utf8String("Username"): .utf8String(username)])
         let payload = Data(cbor.encode())
         try coap.setRequestPayload(contentFormat: ContentFormat.APPLICATION_CBOR.rawValue, data: payload)

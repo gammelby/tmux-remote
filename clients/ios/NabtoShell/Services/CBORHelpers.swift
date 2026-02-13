@@ -57,11 +57,12 @@ enum CBORHelpers {
 
     // MARK: - Decoding
 
-    /// Decode a control stream message: CBOR map with "sessions" key.
-    /// Format: {"sessions": [{name, cols, rows, attached}, ...]}
+    /// Decode a control stream message.
+    /// Format: {"type":"sessions","sessions":[{name, cols, rows, attached}, ...]}
     static func decodeControlMessage(from data: Data) -> [SessionInfo] {
         guard let decoded = try? CBOR.decode([UInt8](data)) else { return [] }
         guard case .map(let outerMap) = decoded else { return [] }
+        guard case .utf8String("sessions") = outerMap[.utf8String("type")] else { return [] }
         guard case .array(let items) = outerMap[.utf8String("sessions")] else { return [] }
         return decodeSessionArray(items)
     }
@@ -71,24 +72,23 @@ enum CBORHelpers {
         guard let decoded = try? CBOR.decode([UInt8](data)) else { return nil }
         guard case .map(let outerMap) = decoded else { return nil }
 
-        // Check for "type" key (pattern events)
-        if case .utf8String(let typeStr) = outerMap[.utf8String("type")] {
-            switch typeStr {
-            case "pattern_match":
-                return decodePatternMatch(outerMap)
-            case "pattern_dismiss":
-                return .patternDismiss
-            default:
-                return nil
+        guard case .utf8String(let typeStr) = outerMap[.utf8String("type")] else {
+            return nil
+        }
+
+        switch typeStr {
+        case "sessions":
+            if case .array(let items) = outerMap[.utf8String("sessions")] {
+                return .sessions(decodeSessionArray(items))
             }
+            return nil
+        case "pattern_match":
+            return decodePatternMatch(outerMap)
+        case "pattern_dismiss":
+            return .patternDismiss
+        default:
+            return nil
         }
-
-        // No "type" key: legacy sessions message
-        if case .array(let items) = outerMap[.utf8String("sessions")] {
-            return .sessions(decodeSessionArray(items))
-        }
-
-        return nil
     }
 
     private static func decodePatternMatch(_ map: [CBOR: CBOR]) -> ControlStreamEvent? {

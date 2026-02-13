@@ -36,6 +36,7 @@ class ConnectionManager {
     private var eventReceivers: [String: EventReceiver] = [:]
     private var controlStreams: [String: NabtoEdgeClient.Stream] = [:]
     private var controlReadTasks: [String: Task<Void, Never>] = [:]
+    private var controlGenerations: [String: UUID] = [:]
 
     /// Callback for pattern events from agent control stream. (deviceId, event)
     @ObservationIgnored var onPatternEvent: ((String, ControlStreamEvent) -> Void)?
@@ -222,7 +223,7 @@ class ConnectionManager {
         try conn.setProductId(id: info.productId)
         try conn.setDeviceId(id: info.deviceId)
         try conn.setServerConnectToken(sct: info.sct)
-        try await conn.connectAsync()
+        try await connect(conn: conn, timeoutNanoseconds: 10_000_000_000)
         deviceStates[info.deviceId] = .connected
         return conn
     }
@@ -255,21 +256,35 @@ class ConnectionManager {
     // MARK: - Control Stream
 
     private func openControlStream(deviceId: String, connection: Connection) {
+        closeControlStream(deviceId: deviceId)
+        let generation = UUID()
+        controlGenerations[deviceId] = generation
+
         controlReadTasks[deviceId] = Task { [weak self] in
+            guard let self else { return }
             do {
                 let stream = try connection.createStream()
                 try await stream.openAsync(streamPort: 2)
-                self?.controlStreams[deviceId] = stream
-                try await self?.controlReadLoop(deviceId: deviceId, stream: stream)
+                guard self.controlGenerations[deviceId] == generation else {
+                    stream.abort()
+                    return
+                }
+                self.controlStreams[deviceId] = stream
+                try await self.controlReadLoop(deviceId: deviceId, stream: stream)
             } catch {
                 // Agent may not support control stream (old version); fall back silently.
             }
-            self?.controlStreams.removeValue(forKey: deviceId)
-            self?.deviceSessions.removeValue(forKey: deviceId)
+            if self.controlGenerations[deviceId] == generation {
+                self.controlReadTasks.removeValue(forKey: deviceId)
+                self.controlStreams.removeValue(forKey: deviceId)
+                self.deviceSessions.removeValue(forKey: deviceId)
+                self.controlGenerations.removeValue(forKey: deviceId)
+            }
         }
     }
 
     private func closeControlStream(deviceId: String) {
+        controlGenerations.removeValue(forKey: deviceId)
         controlReadTasks.removeValue(forKey: deviceId)?.cancel()
         if let stream = controlStreams.removeValue(forKey: deviceId) {
             stream.abort()
@@ -283,9 +298,12 @@ class ConnectionManager {
         while !Task.isCancelled {
             // Read 4-byte big-endian length prefix
             let lengthData = try await readExactly(stream: stream, buffer: &readBuffer, count: 4)
-            let length = lengthData.withUnsafeBytes { buf in
-                UInt32(bigEndian: buf.load(as: UInt32.self))
-            }
+            let bytes = [UInt8](lengthData)
+            let length =
+                (UInt32(bytes[0]) << 24) |
+                (UInt32(bytes[1]) << 16) |
+                (UInt32(bytes[2]) << 8)  |
+                UInt32(bytes[3])
 
             guard length > 0 && length < 65536 else { break }
 
