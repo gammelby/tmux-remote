@@ -7,6 +7,34 @@
 
 #define NEWLINE "\n"
 #define PATTERN_DEBUG_LOG 0
+
+/* Compare two matches for semantic identity. Returns true if they represent
+ * the same prompt (TUI redraw), false if the prompt changed (new question).
+ * For numbered_menu: compare the extracted prompt text (question line).
+ * For yes_no/accept_reject: compare the full matched_text. */
+static bool match_same_prompt(const nabtoshell_pattern_match *a,
+                              const nabtoshell_pattern_match *b)
+{
+    if (a == NULL || b == NULL) return false;
+    if (a->id == NULL || b->id == NULL) return false;
+    if (strcmp(a->id, b->id) != 0) return false;
+
+    /* For numbered_menu, the prompt field is a stable extraction of the
+     * question line (before numbered items). The matched_text includes
+     * trailing TUI content that varies between feeds, so don't use it. */
+    if (a->prompt != NULL && b->prompt != NULL) {
+        return strcmp(a->prompt, b->prompt) == 0;
+    }
+
+    /* For yes_no / accept_reject, matched_text is the full regex match
+     * which is typically short and stable. */
+    if (a->matched_text != NULL && b->matched_text != NULL) {
+        return strcmp(a->matched_text, b->matched_text) == 0;
+    }
+
+    /* If one has matched_text and the other doesn't, they differ. */
+    return (a->matched_text == NULL && b->matched_text == NULL);
+}
 #define PATTERN_LOG(...) \
     do { if (PATTERN_DEBUG_LOG) fprintf(stderr, __VA_ARGS__); } while (0)
 
@@ -338,10 +366,37 @@ void nabtoshell_pattern_engine_feed(nabtoshell_pattern_engine *e,
         } else if (e->buffer.total_appended % 2000 < stripped_len) {
             PATTERN_LOG("[Pattern] engine_feed: no match, tail_len=%zu\n", tail_len);
         }
-    } else {
+    }
+
+    // Detect prompt replacement: active match is set, but a DIFFERENT
+    // prompt appeared in recent data. Scan only the recent portion of
+    // the buffer (since last match position) to isolate the new prompt
+    // from the old one still in the full match window.
+    if (e->active_match && !e->dismissed) {
+        size_t chars_since = e->buffer.total_appended - e->active_match->match_position;
+        if (chars_since > 0 && chars_since < PATTERN_ENGINE_MATCH_WINDOW) {
+            size_t recent_len;
+            const char *recent = nabtoshell_rolling_buffer_tail(&e->buffer, chars_since, &recent_len);
+            nabtoshell_pattern_match *recent_match = nabtoshell_pattern_matcher_match(
+                &e->matcher, recent, recent_len, e->buffer.total_appended);
+            if (recent_match && !match_same_prompt(e->active_match, recent_match)) {
+                PATTERN_LOG("[Pattern] engine_feed: prompt replaced, old prompt=%s new prompt=%s" NEWLINE,
+                            e->active_match->prompt ? e->active_match->prompt : e->active_match->id,
+                            recent_match->prompt ? recent_match->prompt : recent_match->id);
+                nabtoshell_pattern_match_free(e->active_match);
+                e->active_match = recent_match;
+                recent_match = NULL;
+                should_notify = true;
+                nabtoshell_pattern_match_free(notify_copy);
+                notify_copy = nabtoshell_pattern_match_copy(e->active_match);
+            }
+            nabtoshell_pattern_match_free(recent_match);
+        }
+    }
+
+    if (e->active_match && !should_notify) {
         PATTERN_LOG("[Pattern] skip-new-match: active=%s, dismissed=%d, user_dismissed=%d, total=%zu\n",
-                    e->active_match ? e->active_match->id : "NULL",
-                    e->dismissed, e->user_dismissed, e->buffer.total_appended);
+                    e->active_match->id, e->dismissed, e->user_dismissed, e->buffer.total_appended);
     }
 
     pthread_mutex_unlock(&e->mutex);

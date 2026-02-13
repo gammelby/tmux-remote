@@ -12,6 +12,7 @@
 typedef struct {
     bool is_match;   /* true = match, false = dismiss */
     char id[64];
+    char matched_text[256];
     int pattern_type;
     int action_count;
     size_t bytes_fed;
@@ -33,9 +34,16 @@ static void replay_callback(const nabtoshell_pattern_match *match, void *user_da
         ev->id[sizeof(ev->id) - 1] = '\0';
         ev->pattern_type = match->pattern_type;
         ev->action_count = match->action_count;
+        if (match->matched_text) {
+            strncpy(ev->matched_text, match->matched_text, sizeof(ev->matched_text) - 1);
+            ev->matched_text[sizeof(ev->matched_text) - 1] = '\0';
+        } else {
+            ev->matched_text[0] = '\0';
+        }
     } else {
         ev->is_match = false;
         ev->id[0] = '\0';
+        ev->matched_text[0] = '\0';
         ev->pattern_type = 0;
         ev->action_count = 0;
     }
@@ -48,8 +56,16 @@ static void print_timeline(void)
     for (int i = 0; i < event_count; i++) {
         replay_event *ev = &events[i];
         if (ev->is_match) {
-            fprintf(stderr, "[%6zu bytes] MATCH   id=%-30s type=%d actions=%d\n",
-                    ev->bytes_fed, ev->id, ev->pattern_type, ev->action_count);
+            /* Truncate matched_text for display: show first 200 chars */
+            char display[204];
+            strncpy(display, ev->matched_text, 200);
+            display[200] = '\0';
+            /* Replace newlines with | for single-line display */
+            for (char *p = display; *p; p++) {
+                if (*p == '\n' || *p == '\r') *p = '|';
+            }
+            fprintf(stderr, "[%6zu bytes] MATCH   id=%-30s type=%d actions=%d text=\"%s\"\n",
+                    ev->bytes_fed, ev->id, ev->pattern_type, ev->action_count, display);
         } else {
             fprintf(stderr, "[%6zu bytes] DISMISS\n", ev->bytes_fed);
         }

@@ -825,10 +825,10 @@ START_TEST(test_consume_no_dismiss_short_gap)
     /* The engine must detect the SECOND prompt, even though the first
      * active_match was never dismissed. The prompt text changed. */
     ck_assert_ptr_nonnull(me.active_match);
-    /* This is the critical assertion: the match should reflect the NEW
-     * prompt, not the old one stuck from the first match. Since both
-     * prompts use the same pattern id, we can't distinguish by id.
-     * Instead, verify the match position advanced past the first prompt. */
+    /* Verify the prompt text is from the second prompt. */
+    ck_assert_ptr_nonnull(me.active_match->prompt);
+    ck_assert(strstr(me.active_match->prompt, "bar.txt") != NULL);
+    /* Verify match position advanced past the first prompt + filler. */
     ck_assert(me.active_match->match_position > 1100);
 
     nabtoshell_pattern_engine_free(&me);
