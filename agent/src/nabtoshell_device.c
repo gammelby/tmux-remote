@@ -20,8 +20,10 @@ void nabtoshell_deinit(struct nabtoshell* app)
     free(app->deviceConfigFile);
     free(app->deviceKeyFile);
     free(app->iamStateFile);
+    free(app->recordPtyFile);
     app->homeDir = NULL;
     app->deviceConfigFile = NULL;
     app->deviceKeyFile = NULL;
     app->iamStateFile = NULL;
+    app->recordPtyFile = NULL;
 }

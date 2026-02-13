@@ -8,7 +8,7 @@
 #define NEWLINE "\n"
 #define PATTERN_DEBUG_LOG 0
 #define PATTERN_LOG(...) \
-    do { if (PATTERN_DEBUG_LOG) printf(__VA_ARGS__); } while (0)
+    do { if (PATTERN_DEBUG_LOG) fprintf(stderr, __VA_ARGS__); } while (0)
 
 void nabtoshell_pattern_engine_init(nabtoshell_pattern_engine *e)
 {
@@ -266,6 +266,8 @@ void nabtoshell_pattern_engine_feed(nabtoshell_pattern_engine *e,
         size_t chars_since_match = e->buffer.total_appended - e->active_match->match_position;
 
         if (chars_since_match > PATTERN_ENGINE_AUTO_DISMISS) {
+            PATTERN_LOG("[Pattern] auto-dismiss check: match=%s, chars_since=%zu, total=%zu\n",
+                        e->active_match->id, chars_since_match, e->buffer.total_appended);
             size_t tail_len;
             /* Re-scan the match window to see if the prompt is still near
              * the end of the buffer (i.e. being actively redrawn by a TUI).
@@ -325,6 +327,8 @@ void nabtoshell_pattern_engine_feed(nabtoshell_pattern_engine *e,
         size_t tail_len;
         const char *tail = nabtoshell_rolling_buffer_tail(&e->buffer, PATTERN_ENGINE_MATCH_WINDOW, &tail_len);
         nabtoshell_pattern_match *new_match = nabtoshell_pattern_matcher_match(&e->matcher, tail, tail_len, e->buffer.total_appended);
+        PATTERN_LOG("[Pattern] try-new-match: tail_len=%zu, total=%zu, result=%s\n",
+                    tail_len, e->buffer.total_appended, new_match ? new_match->id : "NULL");
         if (new_match) {
             PATTERN_LOG("[Pattern] engine_feed: new match id=%s, type=%d, actions=%d" NEWLINE,
                         new_match->id, new_match->pattern_type, new_match->action_count);
@@ -332,8 +336,12 @@ void nabtoshell_pattern_engine_feed(nabtoshell_pattern_engine *e,
             should_notify = true;
             notify_copy = nabtoshell_pattern_match_copy(e->active_match);
         } else if (e->buffer.total_appended % 2000 < stripped_len) {
-            PATTERN_LOG("[Pattern] engine_feed: no match, tail_len=%zu" NEWLINE, tail_len);
+            PATTERN_LOG("[Pattern] engine_feed: no match, tail_len=%zu\n", tail_len);
         }
+    } else {
+        PATTERN_LOG("[Pattern] skip-new-match: active=%s, dismissed=%d, user_dismissed=%d, total=%zu\n",
+                    e->active_match ? e->active_match->id : "NULL",
+                    e->dismissed, e->user_dismissed, e->buffer.total_appended);
     }
 
     pthread_mutex_unlock(&e->mutex);

@@ -20,6 +20,8 @@
 #include <pty.h>
 #endif
 
+#include <arpa/inet.h>
+
 #define NEWLINE "\n"
 
 static void start_listen(struct nabtoshell_stream_listener* sl);
@@ -358,6 +360,24 @@ static void* stream_setup_thread(void* arg)
     }
     nabtoshell_pattern_engine_set_callback(&as->patternEngine, pattern_stream_callback, as);
 
+    /* Open PTY recording file if configured */
+    if (as->app->recordPtyFile) {
+        as->ptyRecordFile = fopen(as->app->recordPtyFile, "wb");
+        if (as->ptyRecordFile) {
+            /* Header: "PTYR" magic | version u32 BE | 8 bytes reserved */
+            uint8_t header[16] = {0};
+            memcpy(header, "PTYR", 4);
+            uint32_t version = htonl(1);
+            memcpy(header + 4, &version, 4);
+            fwrite(header, 1, 16, as->ptyRecordFile);
+            fflush(as->ptyRecordFile);
+            printf("Recording PTY data to %s" NEWLINE, as->app->recordPtyFile);
+        } else {
+            printf("Warning: failed to open PTY recording file %s" NEWLINE,
+                   as->app->recordPtyFile);
+        }
+    }
+
     if (pthread_create(&as->ptyReaderThread, NULL, pty_reader_thread, as) != 0) {
         printf("Failed to create PTY->stream thread" NEWLINE);
         kill(pid, SIGTERM);
@@ -440,6 +460,14 @@ static void* pty_reader_thread(void* arg)
         ssize_t n = read(as->ptyFd, buf, sizeof(buf));
         if (n <= 0) {
             break;
+        }
+
+        /* Record raw PTY frame if recording is active */
+        if (as->ptyRecordFile) {
+            uint32_t frameLen = htonl((uint32_t)n);
+            fwrite(&frameLen, 1, 4, as->ptyRecordFile);
+            fwrite(buf, 1, (size_t)n, as->ptyRecordFile);
+            fflush(as->ptyRecordFile);
         }
 
         /* Feed PTY output through per-stream pattern detection */
@@ -529,6 +557,11 @@ static void* cleanup_thread_func(void* arg)
         int status;
         waitpid(as->childPid, &status, 0);
         as->childPid = -1;
+    }
+
+    if (as->ptyRecordFile) {
+        fclose(as->ptyRecordFile);
+        as->ptyRecordFile = NULL;
     }
 
     if (as->patternEngineInitialized) {

@@ -44,6 +44,9 @@ struct nabtoshell {
     /* Pattern detection config (shared by per-stream engines) */
     nabtoshell_pattern_config* patternConfig;
 
+    /* PTY recording file path (NULL if not recording) */
+    char* recordPtyFile;
+
     /* Uptime tracking */
     time_t startTime;
 };

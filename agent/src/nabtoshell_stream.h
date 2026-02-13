@@ -5,6 +5,7 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <pthread.h>
 #include <sys/types.h>
 #include "nabtoshell_session.h"
@@ -27,6 +28,8 @@ struct nabtoshell_active_stream {
     nabtoshell_pattern_engine patternEngine;
     bool patternEngineInitialized;
     NabtoDeviceConnectionRef connectionRef;
+
+    FILE* ptyRecordFile;
 
     char sessionName[NABTOSHELL_SESSION_NAME_MAX];
     uint16_t sessionCols;
