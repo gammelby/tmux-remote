@@ -347,6 +347,38 @@ final class PatternOverlayUITests: XCTestCase {
                              "Prompt text should include 'Do you want to proceed'")
     }
 
+    // MARK: - Recall Pill Tests
+
+    func testRecallPillAppearsAfterDismiss() throws {
+        launchStub(script: Self.numberedMenuScript, agent: "claude-code")
+        waitForTerminal()
+        waitForOverlay()
+
+        // Dismiss the overlay
+        let dismissButton = button(label: "Dismiss")
+        tapButton(dismissButton)
+        waitForOverlayDismissed()
+
+        // Recall pill should appear
+        let recallPill = app.buttons["recall-pill"]
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if recallPill.exists { break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        }
+        XCTAssertTrue(recallPill.exists, "Recall pill should appear after dismiss")
+
+        // Tap the recall pill
+        tapButton(recallPill)
+
+        // Overlay should reappear
+        waitForOverlay()
+
+        // Recall pill should be gone
+        XCTAssertFalse(app.buttons["recall-pill"].exists,
+                       "Recall pill should disappear after recall")
+    }
+
     // MARK: - Guard Tests
 
     func testOverlayNotShownWithoutAgent() throws {

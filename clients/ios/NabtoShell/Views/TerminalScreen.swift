@@ -18,6 +18,8 @@ struct TerminalScreen: View {
     @State private var isConnecting = false
     @State private var isReconnecting = false
     @State private var isDismissing = false
+    @State private var overlayOffset: CGSize = .zero
+    @State private var overlayDragBase: CGSize = .zero
     @State private var connectTask: Task<Void, Never>?
     #if DEBUG
     @State private var lastSentKeys: String = ""
@@ -78,6 +80,9 @@ struct TerminalScreen: View {
                     agentPill
                         .padding(.top, 8)
 
+                    recallPill
+                        .padding(.top, 8)
+
                     connectionPill
                         .padding(.trailing, 12)
                         .padding(.top, 8)
@@ -98,15 +103,38 @@ struct TerminalScreen: View {
                             lastSentKeys = action.keys
                             #endif
                             nabtoService.writeToStream(Data(action.keys.utf8))
-                            patternEngine.dismiss()
-                            connectionManager.sendPatternDismiss(deviceId: bookmark.deviceId)
+                            overlayOffset = .zero
+                            overlayDragBase = .zero
+                            patternEngine.consume()
+                            // No sendPatternDismiss here: the keystroke resolves the
+                            // prompt and the agent auto-dismisses. Sending an explicit
+                            // dismiss would trigger a 4000-char agent-side cooldown
+                            // that suppresses detection of the next prompt.
                         },
                         onDismiss: {
+                            overlayOffset = .zero
+                            overlayDragBase = .zero
+                            let wasRecalled = patternEngine.isRecalledMatch
                             patternEngine.dismiss()
-                            connectionManager.sendPatternDismiss(deviceId: bookmark.deviceId)
+                            if !wasRecalled {
+                                connectionManager.sendPatternDismiss(deviceId: bookmark.deviceId)
+                            }
                         }
                     )
                 }
+                .offset(x: overlayOffset.width, y: overlayOffset.height)
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            overlayOffset = CGSize(
+                                width: overlayDragBase.width + value.translation.width,
+                                height: overlayDragBase.height + value.translation.height
+                            )
+                        }
+                        .onEnded { _ in
+                            overlayDragBase = overlayOffset
+                        }
+                )
                 .transition(.move(edge: .bottom))
                 .animation(.easeInOut(duration: 0.2), value: patternEngine.activeMatch != nil)
             }
@@ -116,7 +144,7 @@ struct TerminalScreen: View {
                 .frame(width: 0, height: 0)
                 .opacity(0)
                 .accessibilityIdentifier("debug-sent-keys")
-            Text("agent:\(patternEngine.activeAgent ?? "nil") match:\(patternEngine.activeMatch?.id ?? "nil") err:\(showError) done:\(initialConnectionDone)")
+            Text("agent:\(patternEngine.activeAgent ?? "nil") match:\(patternEngine.activeMatch?.id ?? "nil") last:\(patternEngine.lastMatch?.id ?? "nil") err:\(showError) done:\(initialConnectionDone)")
                 .frame(width: 0, height: 0)
                 .opacity(0)
                 .accessibilityIdentifier("debug-pattern-state")
@@ -173,6 +201,10 @@ struct TerminalScreen: View {
                 handleStreamClosed()
             }
         }
+        .onChange(of: patternEngine.activeMatch?.id) { _, _ in
+            overlayOffset = .zero
+            overlayDragBase = .zero
+        }
         .alert("Error", isPresented: $showError) {
             Button("Retry") {
                 Task { await connectAndAttach() }
@@ -211,6 +243,27 @@ struct TerminalScreen: View {
             .clipShape(Capsule())
         }
         .accessibilityIdentifier("agent-pill")
+    }
+
+    @ViewBuilder
+    private var recallPill: some View {
+        if patternEngine.activeMatch == nil && patternEngine.lastMatch != nil {
+            Button {
+                patternEngine.recall()
+            } label: {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.orange.opacity(0.85))
+                    .foregroundColor(.white)
+                    .clipShape(Capsule())
+            }
+            .accessibilityIdentifier("recall-pill")
+            .transition(.scale.combined(with: .opacity))
+            .animation(.easeInOut(duration: 0.2), value: patternEngine.lastMatch != nil)
+        }
     }
 
     private var agentPillLabel: String {

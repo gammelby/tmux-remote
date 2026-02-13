@@ -6,6 +6,9 @@ import Foundation
 @Observable
 class PatternEngine {
     private(set) var activeMatch: PatternMatch?
+    private(set) var lastMatch: PatternMatch?
+    /// True when the active match was restored via recall (agent already knows about the dismiss).
+    private(set) var isRecalledMatch = false
     var activeAgent: String?
     #if DEBUG
     func testSetUserDismissTime(_ date: Date?) { userDismissTime = date }
@@ -30,6 +33,7 @@ class PatternEngine {
     func selectAgent(_ agentId: String?) {
         activeAgent = agentId
         activeMatch = nil
+        lastMatch = nil
         // Persist selection
         if let deviceId = deviceId {
             UserDefaults.standard.set(agentId, forKey: "patternAgent_\(deviceId)")
@@ -55,24 +59,53 @@ class PatternEngine {
             return
         }
         userDismissTime = nil
+        lastMatch = nil
+        isRecalledMatch = false
         activeMatch = match
         AppLog.log("applyServerMatch: activeMatch now=%@", activeMatch?.id ?? "nil")
     }
 
     /// Apply a server-pushed pattern dismiss from the agent control stream.
+    /// Does NOT clear lastMatch: the user should still be able to recall
+    /// what they dismissed even after the agent confirms the prompt is gone.
     func applyServerDismiss() {
-        AppLog.log("applyServerDismiss: currentMatch=%@", activeMatch?.id ?? "nil")
+        AppLog.log("applyServerDismiss: currentMatch=%@, lastMatch=%@",
+                   activeMatch?.id ?? "nil", lastMatch?.id ?? "nil")
         activeMatch = nil
     }
 
+    /// User tapped "Dismiss" without choosing an action. Save match for recall.
     func dismiss() {
-        AppLog.log("dismiss: user dismiss, currentMatch=%@", activeMatch?.id ?? "nil")
+        AppLog.log("dismiss: user dismiss, currentMatch=%@, recalled=%d",
+                   activeMatch?.id ?? "nil", isRecalledMatch ? 1 : 0)
+        lastMatch = activeMatch
         userDismissTime = Date()
         activeMatch = nil
+        isRecalledMatch = false
+    }
+
+    /// User chose an action. Clear the match without saving for recall,
+    /// and without debouncing future server matches.
+    func consume() {
+        AppLog.log("consume: user acted, currentMatch=%@", activeMatch?.id ?? "nil")
+        activeMatch = nil
+        lastMatch = nil
+        isRecalledMatch = false
+    }
+
+    /// Restore the last dismissed match to the active overlay.
+    func recall() {
+        guard let match = lastMatch else { return }
+        AppLog.log("recall: restoring match=%@", match.id)
+        activeMatch = match
+        lastMatch = nil
+        isRecalledMatch = true
     }
 
     func reset() {
         activeMatch = nil
+        lastMatch = nil
+        isRecalledMatch = false
         userDismissTime = nil
     }
 

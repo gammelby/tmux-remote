@@ -7,6 +7,13 @@ struct PatternOverlayView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Drag handle
+            RoundedRectangle(cornerRadius: 2.5)
+                .fill(Color.secondary.opacity(0.4))
+                .frame(width: 36, height: 5)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+
             // Prompt header
             if let prompt = match.prompt {
                 Text(prompt)
@@ -106,6 +113,7 @@ struct PatternOverlayView: View {
                 Text(action.label)
                     .font(.body)
                     .foregroundColor(menuItemColor(for: action.label))
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)

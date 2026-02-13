@@ -241,4 +241,130 @@ final class PatternEngineTests: XCTestCase {
         engine.dismiss()
         XCTAssertNil(engine.activeMatch)
     }
+
+    // MARK: - Recall / lastMatch
+
+    func testDismissSavesLastMatch() {
+        let engine = PatternEngine()
+        engine.loadConfig(makeConfig())
+        engine.selectAgent("test")
+
+        engine.applyServerMatch(makeMatch())
+        engine.dismiss()
+
+        XCTAssertNil(engine.activeMatch)
+        XCTAssertNotNil(engine.lastMatch)
+        XCTAssertEqual(engine.lastMatch?.id, "yn")
+    }
+
+    func testRecallRestoresLastMatch() {
+        let engine = PatternEngine()
+        engine.loadConfig(makeConfig())
+        engine.selectAgent("test")
+
+        engine.applyServerMatch(makeMatch())
+        engine.dismiss()
+        XCTAssertNil(engine.activeMatch)
+
+        engine.recall()
+        XCTAssertNotNil(engine.activeMatch)
+        XCTAssertEqual(engine.activeMatch?.id, "yn")
+        XCTAssertNil(engine.lastMatch)
+    }
+
+    func testRecallNoOpWhenNoLastMatch() {
+        let engine = PatternEngine()
+        engine.loadConfig(makeConfig())
+        engine.selectAgent("test")
+
+        engine.recall()
+        XCTAssertNil(engine.activeMatch)
+        XCTAssertNil(engine.lastMatch)
+    }
+
+    func testServerMatchClearsLastMatch() {
+        let engine = PatternEngine()
+        engine.loadConfig(makeConfig())
+        engine.selectAgent("test")
+
+        engine.applyServerMatch(makeMatch())
+        engine.dismiss()
+        XCTAssertNotNil(engine.lastMatch)
+
+        // Expire the 2s debounce so the next server match is accepted
+        engine.testSetUserDismissTime(Date().addingTimeInterval(-3.0))
+
+        engine.applyServerMatch(makeMatch(id: "new", prompt: "New prompt?"))
+        XCTAssertNil(engine.lastMatch)
+        XCTAssertEqual(engine.activeMatch?.id, "new")
+    }
+
+    func testServerDismissPreservesLastMatch() {
+        let engine = PatternEngine()
+        engine.loadConfig(makeConfig())
+        engine.selectAgent("test")
+
+        engine.applyServerMatch(makeMatch())
+        engine.dismiss()
+        XCTAssertNotNil(engine.lastMatch)
+
+        // Server dismiss should NOT clear lastMatch: the user can still recall
+        engine.applyServerDismiss()
+        XCTAssertNotNil(engine.lastMatch, "Server dismiss should preserve lastMatch for recall")
+    }
+
+    func testResetClearsLastMatch() {
+        let engine = PatternEngine()
+        engine.loadConfig(makeConfig())
+        engine.selectAgent("test")
+
+        engine.applyServerMatch(makeMatch())
+        engine.dismiss()
+        XCTAssertNotNil(engine.lastMatch)
+
+        engine.reset()
+        XCTAssertNil(engine.lastMatch)
+    }
+
+    func testSelectAgentNilClearsLastMatch() {
+        let engine = PatternEngine()
+        engine.loadConfig(makeConfig())
+        engine.selectAgent("test")
+
+        engine.applyServerMatch(makeMatch())
+        engine.dismiss()
+        XCTAssertNotNil(engine.lastMatch)
+
+        engine.selectAgent(nil)
+        XCTAssertNil(engine.lastMatch)
+    }
+
+    // MARK: - Consume (action taken)
+
+    func testConsumeDoesNotSaveLastMatch() {
+        let engine = PatternEngine()
+        engine.loadConfig(makeConfig())
+        engine.selectAgent("test")
+
+        engine.applyServerMatch(makeMatch())
+        XCTAssertNotNil(engine.activeMatch)
+
+        engine.consume()
+        XCTAssertNil(engine.activeMatch)
+        XCTAssertNil(engine.lastMatch, "consume() should not save to lastMatch")
+    }
+
+    func testConsumeDoesNotDebounce() {
+        let engine = PatternEngine()
+        engine.loadConfig(makeConfig())
+        engine.selectAgent("test")
+
+        engine.applyServerMatch(makeMatch())
+        engine.consume()
+
+        // Next server match should be accepted immediately (no debounce)
+        engine.applyServerMatch(makeMatch(id: "next", prompt: "Next prompt?"))
+        XCTAssertNotNil(engine.activeMatch, "Server match after consume should not be debounced")
+        XCTAssertEqual(engine.activeMatch?.id, "next")
+    }
 }
