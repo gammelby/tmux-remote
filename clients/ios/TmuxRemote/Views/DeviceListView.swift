@@ -18,6 +18,7 @@ struct DeviceListView: View {
     @State private var newSessionName = ""
     @State private var newSessionDevice: DeviceBookmark?
     @State private var probeStatuses: [String: ProbeStatus] = [:]
+    @State private var showSettings = false
 
     /// Tracks devices where we fell back to CoAP probing (old agent without control stream).
     private enum ProbeStatus {
@@ -34,8 +35,15 @@ struct DeviceListView: View {
                 deviceList
             }
         }
-        .navigationTitle("Devices")
+        .navigationTitle("Agents")
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    showSettings = true
+                } label: {
+                    Image(systemName: "gear")
+                }
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     showPairing = true
@@ -46,6 +54,9 @@ struct DeviceListView: View {
         }
         .sheet(isPresented: $showPairing) {
             PairingView(nabtoService: nabtoService, bookmarkStore: bookmarkStore)
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
         }
         .navigationDestination(item: $selectedTerminal) { target in
             TerminalScreen(
@@ -200,7 +211,7 @@ struct DeviceListView: View {
             .padding(.leading, 24)
 
         case .offline:
-            Text("Device unreachable")
+            Text("Agent unreachable")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .padding(.leading, 24)
@@ -236,8 +247,8 @@ struct DeviceListView: View {
                     .font(.caption2)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color.blue.opacity(0.15))
-                    .foregroundColor(.blue)
+                    .background(Color.tmuxAccent.opacity(0.15))
+                    .foregroundColor(.tmuxAccent)
                     .clipShape(Capsule())
             }
         }
@@ -287,14 +298,14 @@ struct DeviceListView: View {
 
     private func statusColor(for deviceId: String) -> Color {
         if connectionManager.deviceSessions[deviceId] != nil {
-            return .green
+            return .tmuxOnline
         }
         if case .done = probeStatuses[deviceId] {
-            return .green
+            return .tmuxOnline
         }
         switch connectionManager.deviceStates[deviceId] {
-        case .connected: return .green
-        case .disconnected, .offline: return .red
+        case .connected: return .tmuxOnline
+        case .disconnected, .offline: return .tmuxOffline
         default: return .gray
         }
     }

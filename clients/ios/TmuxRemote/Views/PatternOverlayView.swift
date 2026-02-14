@@ -4,6 +4,7 @@ struct PatternOverlayView: View {
     let match: PatternMatch
     let onAction: (ResolvedAction) -> Void
     let onDismiss: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,7 +48,7 @@ struct PatternOverlayView: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(.systemBackground))
+                .fill(colorScheme == .dark ? Color.tmuxSurface : Color(.systemBackground))
         )
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .shadow(color: .black.opacity(0.2), radius: 10, y: -2)
@@ -125,7 +126,7 @@ struct PatternOverlayView: View {
     private func actionColor(for label: String, isFirst: Bool) -> Color {
         let lower = label.lowercased()
         if lower == "no" || lower == "deny" || lower == "reject" {
-            return .red
+            return .tmuxDestructive
         }
         return .accentColor
     }
@@ -133,7 +134,7 @@ struct PatternOverlayView: View {
     private func menuItemColor(for label: String) -> Color {
         let lower = label.lowercased()
         if lower == "no" || lower.hasPrefix("no,") {
-            return .red
+            return .tmuxDestructive
         }
         return .accentColor
     }

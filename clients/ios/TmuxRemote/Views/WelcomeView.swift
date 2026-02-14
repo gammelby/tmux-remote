@@ -26,7 +26,7 @@ struct WelcomeView: View {
             Button {
                 showPairing = true
             } label: {
-                Label("Add Device", systemImage: "plus")
+                Label("Add Agent", systemImage: "plus")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding()

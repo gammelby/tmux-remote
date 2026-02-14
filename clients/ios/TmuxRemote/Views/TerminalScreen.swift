@@ -61,7 +61,7 @@ struct TerminalScreen: View {
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
-                            Text("Devices")
+                            Text("Agents")
                         }
                         .font(.caption)
                         .fontWeight(.medium)
@@ -239,13 +239,13 @@ struct TerminalScreen: View {
         case .disconnected:
             return ("Disconnected", .gray)
         case .connecting:
-            return ("Connecting...", .blue)
+            return ("Connecting...", .tmuxAccent)
         case .connected:
-            return ("Connected", .green)
+            return ("Connected", .tmuxOnline)
         case .reconnecting(let attempt):
             return ("Reconnecting (\(attempt))...", .orange)
         case .offline:
-            return ("Offline", .red)
+            return ("Offline", .tmuxOffline)
         }
     }
 
@@ -337,7 +337,7 @@ struct TerminalScreen: View {
                 Button {
                     dismissToDevices()
                 } label: {
-                    Text("Back to Devices")
+                    Text("Back to Agents")
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .padding(.horizontal, 16)
