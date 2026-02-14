@@ -3,18 +3,18 @@ import XCTest
 
 final class PatternConfigTests: XCTestCase {
 
-    func testDecodeBundledFormat() {
+    func testDecodeV3RulesFormat() {
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "agents": {
             "test-agent": {
               "name": "Test Agent",
-              "patterns": [
+              "rules": [
                 {
                   "id": "yes_prompt",
                   "type": "yes_no",
-                  "regex": "Continue\\\\?.*\\\\(y\\\\/n\\\\)",
+                  "prompt_regex": "Continue\\\\?.*\\\\(y\\\\/n\\\\)",
                   "actions": [
                     { "label": "Yes", "keys": "y" },
                     { "label": "No", "keys": "n" }
@@ -28,33 +28,35 @@ final class PatternConfigTests: XCTestCase {
 
         let config = PatternConfigLoader.load(from: json)
         XCTAssertNotNil(config)
-        XCTAssertEqual(config?.version, 2)
+        XCTAssertEqual(config?.version, 3)
         XCTAssertEqual(config?.agents.count, 1)
 
         let agent = config?.agents["test-agent"]
         XCTAssertEqual(agent?.name, "Test Agent")
-        XCTAssertEqual(agent?.patterns.count, 1)
+        XCTAssertEqual(agent?.rules.count, 1)
 
-        let pattern = agent?.patterns[0]
-        XCTAssertEqual(pattern?.id, "yes_prompt")
-        XCTAssertEqual(pattern?.type, .yesNo)
-        XCTAssertEqual(pattern?.actions?.count, 2)
+        let rule = agent?.rules[0]
+        XCTAssertEqual(rule?.id, "yes_prompt")
+        XCTAssertEqual(rule?.type, .yesNo)
+        XCTAssertEqual(rule?.actions?.count, 2)
+        XCTAssertEqual(rule?.promptRegex, "Continue\\?.*\\(y\\/n\\)")
     }
 
-    func testDecodeNumberedMenu() {
+    func testDecodeNumberedMenuRule() {
         let json = """
         {
-          "version": 1,
+          "version": 3,
           "agents": {
             "a": {
               "name": "A",
-              "patterns": [
+              "rules": [
                 {
                   "id": "menu",
                   "type": "numbered_menu",
-                  "regex": "\\\\[\\\\d+\\\\]\\\\s+.+",
-                  "multi_line": true,
-                  "action_template": { "keys": "{number}\\n" }
+                  "prompt_regex": "Pick one",
+                  "option_regex": "^\\\\s*([0-9]+)\\\\.\\\\s+(.+)$",
+                  "action_template": { "keys": "{number}\\n" },
+                  "max_scan_lines": 8
                 }
               ]
             }
@@ -65,21 +67,21 @@ final class PatternConfigTests: XCTestCase {
         let config = PatternConfigLoader.load(from: json)
         XCTAssertNotNil(config)
 
-        let pattern = config?.agents["a"]?.patterns[0]
-        XCTAssertEqual(pattern?.type, .numberedMenu)
-        XCTAssertEqual(pattern?.multiLine, true)
-        XCTAssertEqual(pattern?.actionTemplate?.keys, "{number}\n")
-        XCTAssertNil(pattern?.actions)
+        let rule = config?.agents["a"]?.rules[0]
+        XCTAssertEqual(rule?.type, .numberedMenu)
+        XCTAssertEqual(rule?.actionTemplate?.keys, "{number}\n")
+        XCTAssertEqual(rule?.maxScanLines, 8)
+        XCTAssertEqual(rule?.optionRegex, "^\\s*([0-9]+)\\.\\s+(.+)$")
     }
 
-    func testDecodeEmptyPatterns() {
+    func testDecodeEmptyRules() {
         let json = """
         {
-          "version": 1,
+          "version": 3,
           "agents": {
             "empty": {
               "name": "Empty",
-              "patterns": []
+              "rules": []
             }
           }
         }
@@ -87,7 +89,7 @@ final class PatternConfigTests: XCTestCase {
 
         let config = PatternConfigLoader.load(from: json)
         XCTAssertNotNil(config)
-        XCTAssertEqual(config?.agents["empty"]?.patterns.count, 0)
+        XCTAssertEqual(config?.agents["empty"]?.rules.count, 0)
     }
 
     func testInvalidJSON() {
@@ -97,7 +99,6 @@ final class PatternConfigTests: XCTestCase {
     }
 
     func testMissingRequiredFields() {
-        // Missing "version"
         let json = """
         {
           "agents": {}
@@ -105,33 +106,5 @@ final class PatternConfigTests: XCTestCase {
         """.data(using: .utf8)!
         let config = PatternConfigLoader.load(from: json)
         XCTAssertNil(config)
-    }
-
-    func testOptionalMultiLine() {
-        let json = """
-        {
-          "version": 1,
-          "agents": {
-            "a": {
-              "name": "A",
-              "patterns": [
-                {
-                  "id": "p",
-                  "type": "yes_no",
-                  "regex": "test",
-                  "actions": [
-                    { "label": "Y", "keys": "y" },
-                    { "label": "N", "keys": "n" }
-                  ]
-                }
-              ]
-            }
-          }
-        }
-        """.data(using: .utf8)!
-
-        let config = PatternConfigLoader.load(from: json)
-        let pattern = config?.agents["a"]?.patterns[0]
-        XCTAssertNil(pattern?.multiLine)
     }
 }
