@@ -7,14 +7,14 @@ struct ResolvedAction: Identifiable, Equatable {
 }
 
 struct PatternMatch: Identifiable, Equatable {
-    let id: String
+    let id: String              // instance_id
+    let patternId: String
     let patternType: PatternType
     let prompt: String?
-    let matchedText: String
     let actions: [ResolvedAction]
-    let matchPosition: Int
+    let revision: Int
 
     static func == (lhs: PatternMatch, rhs: PatternMatch) -> Bool {
-        lhs.id == rhs.id && lhs.matchPosition == rhs.matchPosition
+        lhs.id == rhs.id && lhs.revision == rhs.revision
     }
 }

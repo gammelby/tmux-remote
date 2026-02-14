@@ -18,21 +18,26 @@ struct PatternActionTemplate: Codable, Equatable {
 struct PatternDefinition: Codable, Identifiable {
     let id: String
     let type: PatternType
-    let regex: String
-    let multiLine: Bool?
+    let promptRegex: String
+    let optionRegex: String?
     let actions: [PatternAction]?
     let actionTemplate: PatternActionTemplate?
+    let maxScanLines: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id, type, regex, actions
-        case multiLine = "multi_line"
+        case id
+        case type
+        case promptRegex = "prompt_regex"
+        case optionRegex = "option_regex"
+        case actions
         case actionTemplate = "action_template"
+        case maxScanLines = "max_scan_lines"
     }
 }
 
 struct AgentConfig: Codable {
     let name: String
-    let patterns: [PatternDefinition]
+    let rules: [PatternDefinition]
 }
 
 struct PatternConfig: Codable {

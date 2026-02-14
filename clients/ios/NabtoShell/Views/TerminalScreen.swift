@@ -77,12 +77,6 @@ struct TerminalScreen: View {
 
                     Spacer()
 
-                    agentPill
-                        .padding(.top, 8)
-
-                    recallPill
-                        .padding(.top, 8)
-
                     connectionPill
                         .padding(.trailing, 12)
                         .padding(.top, 8)
@@ -103,22 +97,25 @@ struct TerminalScreen: View {
                             lastSentKeys = action.keys
                             #endif
                             nabtoService.writeToStream(Data(action.keys.utf8))
+                            patternEngine.resolveLocally(instanceId: match.id)
+                            connectionManager.sendPatternResolve(
+                                deviceId: bookmark.deviceId,
+                                instanceId: match.id,
+                                decision: "action",
+                                keys: action.keys
+                            )
                             overlayOffset = .zero
                             overlayDragBase = .zero
-                            patternEngine.consume()
-                            // No sendPatternDismiss here: the keystroke resolves the
-                            // prompt and the agent auto-dismisses. Sending an explicit
-                            // dismiss would trigger a 4000-char agent-side cooldown
-                            // that suppresses detection of the next prompt.
                         },
                         onDismiss: {
+                            patternEngine.resolveLocally(instanceId: match.id)
+                            connectionManager.sendPatternResolve(
+                                deviceId: bookmark.deviceId,
+                                instanceId: match.id,
+                                decision: "dismiss"
+                            )
                             overlayOffset = .zero
                             overlayDragBase = .zero
-                            let wasRecalled = patternEngine.isRecalledMatch
-                            patternEngine.dismiss()
-                            if !wasRecalled {
-                                connectionManager.sendPatternDismiss(deviceId: bookmark.deviceId)
-                            }
                         }
                     )
                 }
@@ -144,7 +141,7 @@ struct TerminalScreen: View {
                 .frame(width: 0, height: 0)
                 .opacity(0)
                 .accessibilityIdentifier("debug-sent-keys")
-            Text("agent:\(patternEngine.activeAgent ?? "nil") match:\(patternEngine.activeMatch?.id ?? "nil") last:\(patternEngine.lastMatch?.id ?? "nil") err:\(showError) done:\(initialConnectionDone)")
+            Text("match:\(patternEngine.activeMatch?.id ?? "nil") err:\(showError) done:\(initialConnectionDone)")
                 .frame(width: 0, height: 0)
                 .opacity(0)
                 .accessibilityIdentifier("debug-pattern-state")
@@ -158,16 +155,6 @@ struct TerminalScreen: View {
         .navigationBarHidden(true)
         .task(id: isTerminalReady) {
             guard isTerminalReady, !isConnecting, !initialConnectionDone, !isDismissing else { return }
-            if let config = PatternConfigLoader.loadBundled() {
-                patternEngine.loadConfig(config)
-            }
-            patternEngine.setDeviceId(bookmark.deviceId)
-            #if DEBUG
-            if let idx = ProcessInfo.processInfo.arguments.firstIndex(of: "--stub-agent"),
-               idx + 1 < ProcessInfo.processInfo.arguments.count {
-                patternEngine.selectAgent(ProcessInfo.processInfo.arguments[idx + 1])
-            }
-            #endif
             isConnecting = true
             let task = Task {
                 await connectAndAttach()
@@ -215,63 +202,6 @@ struct TerminalScreen: View {
         } message: {
             Text(errorMessage ?? "Unknown error")
         }
-    }
-
-    @ViewBuilder
-    private var agentPill: some View {
-        Menu {
-            Button(patternEngine.activeAgent == nil ? "Off (selected)" : "Off") {
-                patternEngine.selectAgent(nil)
-            }
-            ForEach(patternEngine.availableAgents, id: \.id) { agent in
-                let selected = patternEngine.activeAgent == agent.id
-                Button(selected ? "\(agent.name) (selected)" : agent.name) {
-                    patternEngine.selectAgent(agent.id)
-                }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "wand.and.stars")
-                Text(agentPillLabel)
-            }
-            .font(.caption2)
-            .fontWeight(.medium)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.purple.opacity(patternEngine.activeAgent != nil ? 0.85 : 0.4))
-            .foregroundColor(.white)
-            .clipShape(Capsule())
-        }
-        .accessibilityIdentifier("agent-pill")
-    }
-
-    @ViewBuilder
-    private var recallPill: some View {
-        if patternEngine.activeMatch == nil && patternEngine.lastMatch != nil {
-            Button {
-                patternEngine.recall()
-            } label: {
-                Image(systemName: "arrow.uturn.backward")
-                    .font(.caption2)
-                    .fontWeight(.medium)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.85))
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
-            }
-            .accessibilityIdentifier("recall-pill")
-            .transition(.scale.combined(with: .opacity))
-            .animation(.easeInOut(duration: 0.2), value: patternEngine.lastMatch != nil)
-        }
-    }
-
-    private var agentPillLabel: String {
-        guard let agentId = patternEngine.activeAgent,
-              let config = patternEngine.availableAgents.first(where: { $0.id == agentId }) else {
-            return "Agent"
-        }
-        return config.name
     }
 
     @ViewBuilder
@@ -329,23 +259,14 @@ struct TerminalScreen: View {
             handleStreamClosed()
         }
         connectionManager.onPatternEvent = { [weak patternEngine] deviceId, event in
-            let isMyDevice = deviceId == bookmark.deviceId
+            guard deviceId == bookmark.deviceId else { return }
             switch event {
-            case .patternMatch(let match):
-                AppLog.log("onPatternEvent: patternMatch id=%@, deviceMatch=%d, engineAlive=%d",
-                           match.id, isMyDevice ? 1 : 0, patternEngine != nil ? 1 : 0)
-            case .patternDismiss:
-                AppLog.log("onPatternEvent: patternDismiss, deviceMatch=%d, engineAlive=%d",
-                           isMyDevice ? 1 : 0, patternEngine != nil ? 1 : 0)
-            case .sessions:
-                break
-            }
-            guard isMyDevice else { return }
-            switch event {
-            case .patternMatch(let match):
-                patternEngine?.applyServerMatch(match)
-            case .patternDismiss:
-                patternEngine?.applyServerDismiss()
+            case .patternPresent(let match):
+                patternEngine?.applyServerPresent(match)
+            case .patternUpdate(let match):
+                patternEngine?.applyServerUpdate(match)
+            case .patternGone(let instanceId):
+                patternEngine?.applyServerGone(instanceId: instanceId)
             case .sessions:
                 break
             }
@@ -366,12 +287,10 @@ struct TerminalScreen: View {
             guard !isDismissing else { throw CancellationError() }
             bookmarkStore.updateLastSession(deviceId: bookmark.deviceId, session: sessionName)
         } catch is CancellationError {
-            // Navigated away before initial resume connect completed.
             return
         } catch let error as NabtoError {
             switch error {
             case .sessionNotFound:
-                // Session was destroyed; silently return to device list.
                 bookmarkStore.clearLastSession(deviceId: bookmark.deviceId)
                 dismissToDevices()
                 return

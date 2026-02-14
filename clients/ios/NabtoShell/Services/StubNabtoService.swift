@@ -24,9 +24,6 @@ class StubNabtoService: NabtoService {
     override func openStream(bookmark: DeviceBookmark) async throws {
         let deviceId = bookmark.deviceId
         let events = scriptedEvents
-        AppLog.log("StubNabtoService.openStream: events=%d", events.count)
-        // Deliver pattern events via the control stream callback,
-        // matching the production code path.
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard self != nil else { return }
@@ -36,9 +33,12 @@ class StubNabtoService: NabtoService {
                 }
                 let cm = self?.cm
                 switch event.type {
-                case "pattern_match":
-                    guard let patternId = event.patternId,
-                          let patternTypeStr = event.patternType else { continue }
+                case "pattern_present", "pattern_update":
+                    guard let instanceId = event.instanceId,
+                          let patternId = event.patternId,
+                          let patternTypeStr = event.patternType else {
+                        continue
+                    }
                     let patternType: PatternType
                     switch patternTypeStr {
                     case "yes_no": patternType = .yesNo
@@ -50,18 +50,22 @@ class StubNabtoService: NabtoService {
                         ResolvedAction(label: $0.label, keys: $0.keys)
                     }
                     let match = PatternMatch(
-                        id: patternId,
+                        id: instanceId,
+                        patternId: patternId,
                         patternType: patternType,
                         prompt: event.prompt,
-                        matchedText: "",
                         actions: actions,
-                        matchPosition: 0
+                        revision: event.revision ?? 1
                     )
-                    AppLog.log("StubNabtoService: delivering pattern_match id=%@", patternId)
-                    cm?.onPatternEvent?(deviceId, .patternMatch(match))
-                case "pattern_dismiss":
-                    AppLog.log("StubNabtoService: delivering pattern_dismiss")
-                    cm?.onPatternEvent?(deviceId, .patternDismiss)
+                    if event.type == "pattern_present" {
+                        cm?.onPatternEvent?(deviceId, .patternPresent(match))
+                    } else {
+                        cm?.onPatternEvent?(deviceId, .patternUpdate(match))
+                    }
+                case "pattern_gone":
+                    if let instanceId = event.instanceId {
+                        cm?.onPatternEvent?(deviceId, .patternGone(instanceId))
+                    }
                 default:
                     break
                 }

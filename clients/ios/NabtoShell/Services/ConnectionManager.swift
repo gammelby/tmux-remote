@@ -245,11 +245,10 @@ class ConnectionManager {
         openControlStream(deviceId: deviceId, connection: conn)
     }
 
-    /// Send a pattern dismiss message to the agent's control stream.
-    /// Called when the user taps an action button on the pattern overlay.
-    func sendPatternDismiss(deviceId: String) {
+    /// Send a pattern resolve message to the agent's control stream.
+    func sendPatternResolve(deviceId: String, instanceId: String, decision: String, keys: String? = nil) {
         guard let stream = controlStreams[deviceId] else { return }
-        let data = CBORHelpers.encodePatternDismiss()
+        let data = CBORHelpers.encodePatternResolve(instanceId: instanceId, decision: decision, keys: keys)
         Task { try? await stream.writeAsync(data: data) }
     }
 
@@ -315,16 +314,23 @@ class ConnectionManager {
             switch event {
             case .sessions(let sessions):
                 self.deviceSessions[deviceId] = sessions
-            case .patternMatch(let match):
-                AppLog.log("controlReadLoop: decoded patternMatch id=%@", match.id)
+            case .patternPresent(let match):
+                AppLog.log("controlReadLoop: decoded patternPresent instance=%@", match.id)
                 let hasCallback = self.onPatternEvent != nil
-                AppLog.log("controlReadLoop: patternMatch id=%@, onPatternEvent=%@",
+                AppLog.log("controlReadLoop: patternPresent instance=%@, onPatternEvent=%@",
                            match.id, hasCallback ? "set" : "NIL")
                 self.onPatternEvent?(deviceId, event)
-            case .patternDismiss:
-                AppLog.log("controlReadLoop: decoded patternDismiss")
+            case .patternUpdate(let match):
+                AppLog.log("controlReadLoop: decoded patternUpdate instance=%@", match.id)
                 let hasCallback = self.onPatternEvent != nil
-                AppLog.log("controlReadLoop: patternDismiss, onPatternEvent=%@",
+                AppLog.log("controlReadLoop: patternUpdate instance=%@, onPatternEvent=%@",
+                           match.id, hasCallback ? "set" : "NIL")
+                self.onPatternEvent?(deviceId, event)
+            case .patternGone(let instanceId):
+                AppLog.log("controlReadLoop: decoded patternGone instance=%@", instanceId)
+                let hasCallback = self.onPatternEvent != nil
+                AppLog.log("controlReadLoop: patternGone instance=%@, onPatternEvent=%@",
+                           instanceId,
                            hasCallback ? "set" : "NIL")
                 self.onPatternEvent?(deviceId, event)
             }

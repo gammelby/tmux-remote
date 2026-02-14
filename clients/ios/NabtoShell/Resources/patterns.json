@@ -1,43 +1,46 @@
 {
-  "version": 2,
+  "version": 3,
   "agents": {
     "claude-code": {
       "name": "Claude Code",
-      "patterns": [
+      "rules": [
         {
           "id": "numbered_prompt",
           "type": "numbered_menu",
-          "regex": "Do you want to .+\\? *\\n.*1\\. .+\\n.*2\\. .+",
-          "multi_line": true,
-          "action_template": { "keys": "{number}" }
+          "prompt_regex": "Do you want to .+\\?",
+          "option_regex": "^\\s*([0-9]+)\\.\\s+(.+)$",
+          "action_template": { "keys": "{number}" },
+          "max_scan_lines": 8
         },
         {
           "id": "yes_no_prompt",
           "type": "yes_no",
-          "regex": "(?:Allow|Proceed|Run|Execute).*\\? \\(y\\/n\\)",
+          "prompt_regex": "(?:Allow|Proceed|Run|Execute).*\\? \\(y\\/n\\)",
           "actions": [
             { "label": "Allow", "keys": "y" },
             { "label": "Deny", "keys": "n" }
-          ]
+          ],
+          "max_scan_lines": 4
         },
         {
           "id": "diff_review",
           "type": "accept_reject",
-          "regex": "Do you want to apply these changes",
+          "prompt_regex": "Do you want to apply these changes",
           "actions": [
             { "label": "Accept", "keys": "y" },
             { "label": "Reject", "keys": "n" }
-          ]
+          ],
+          "max_scan_lines": 4
         }
       ]
     },
     "codex": {
       "name": "OpenAI Codex CLI",
-      "patterns": []
+      "rules": []
     },
     "aider": {
       "name": "Aider",
-      "patterns": []
+      "rules": []
     }
   }
 }

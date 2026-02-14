@@ -4,8 +4,9 @@ import SwiftCBOR
 /// Decoded control stream event from agent.
 enum ControlStreamEvent {
     case sessions([SessionInfo])
-    case patternMatch(PatternMatch)
-    case patternDismiss
+    case patternPresent(PatternMatch)
+    case patternUpdate(PatternMatch)
+    case patternGone(String)
 }
 
 enum CBORHelpers {
@@ -42,13 +43,17 @@ enum CBORHelpers {
         return Data(cbor.encode())
     }
 
-    /// Encode a pattern dismiss as a length-prefixed CBOR message
-    /// for sending back to the agent on the control stream.
-    static func encodePatternDismiss() -> Data {
-        let cbor: CBOR = .map([
-            .utf8String("type"): .utf8String("pattern_dismiss")
-        ])
-        let payload = Data(cbor.encode())
+    static func encodePatternResolve(instanceId: String, decision: String, keys: String?) -> Data {
+        var map: [CBOR: CBOR] = [
+            .utf8String("type"): .utf8String("pattern_resolve"),
+            .utf8String("instance_id"): .utf8String(instanceId),
+            .utf8String("decision"): .utf8String(decision)
+        ]
+        if let keys {
+            map[.utf8String("keys")] = .utf8String(keys)
+        }
+
+        let payload = Data(CBOR.map(map).encode())
         var lengthPrefix = Data(count: 4)
         let len = UInt32(payload.count).bigEndian
         withUnsafeBytes(of: len) { lengthPrefix.replaceSubrange(0..<4, with: $0) }
@@ -57,8 +62,6 @@ enum CBORHelpers {
 
     // MARK: - Decoding
 
-    /// Decode a control stream message.
-    /// Format: {"type":"sessions","sessions":[{name, cols, rows, attached}, ...]}
     static func decodeControlMessage(from data: Data) -> [SessionInfo] {
         guard let decoded = try? CBOR.decode([UInt8](data)) else { return [] }
         guard case .map(let outerMap) = decoded else { return [] }
@@ -67,7 +70,6 @@ enum CBORHelpers {
         return decodeSessionArray(items)
     }
 
-    /// Decode a control stream event: sessions update, pattern match, or pattern dismiss.
     static func decodeControlStreamEvent(from data: Data) -> ControlStreamEvent? {
         guard let decoded = try? CBOR.decode([UInt8](data)) else { return nil }
         guard case .map(let outerMap) = decoded else { return nil }
@@ -82,26 +84,36 @@ enum CBORHelpers {
                 return .sessions(decodeSessionArray(items))
             }
             return nil
-        case "pattern_match":
-            return decodePatternMatch(outerMap)
-        case "pattern_dismiss":
-            return .patternDismiss
+        case "pattern_present":
+            guard let match = decodePatternInstance(outerMap) else { return nil }
+            return .patternPresent(match)
+        case "pattern_update":
+            guard let match = decodePatternInstance(outerMap) else { return nil }
+            return .patternUpdate(match)
+        case "pattern_gone":
+            guard case .utf8String(let instanceId) = outerMap[.utf8String("instance_id")] else {
+                return nil
+            }
+            return .patternGone(instanceId)
         default:
             return nil
         }
     }
 
-    private static func decodePatternMatch(_ map: [CBOR: CBOR]) -> ControlStreamEvent? {
-        guard case .utf8String(let patternId) = map[.utf8String("pattern_id")] else { return nil }
-        guard case .utf8String(let typeStr) = map[.utf8String("pattern_type")] else { return nil }
-
-        let patternType: PatternType
+    private static func decodePatternType(_ value: CBOR?) -> PatternType? {
+        guard case .utf8String(let typeStr) = value else { return nil }
         switch typeStr {
-        case "yes_no": patternType = .yesNo
-        case "numbered_menu": patternType = .numberedMenu
-        case "accept_reject": patternType = .acceptReject
+        case "yes_no": return .yesNo
+        case "numbered_menu": return .numberedMenu
+        case "accept_reject": return .acceptReject
         default: return nil
         }
+    }
+
+    private static func decodePatternInstance(_ map: [CBOR: CBOR]) -> PatternMatch? {
+        guard case .utf8String(let instanceId) = map[.utf8String("instance_id")] else { return nil }
+        guard case .utf8String(let patternId) = map[.utf8String("pattern_id")] else { return nil }
+        guard let patternType = decodePatternType(map[.utf8String("pattern_type")]) else { return nil }
 
         let prompt: String?
         if case .utf8String(let p) = map[.utf8String("prompt")] {
@@ -120,17 +132,23 @@ enum CBORHelpers {
             }
         }
 
+        let revision: Int
+        if case .unsignedInt(let value) = map[.utf8String("revision")] {
+            revision = Int(value)
+        } else {
+            revision = 1
+        }
+
         guard !actions.isEmpty else { return nil }
 
-        let match = PatternMatch(
-            id: patternId,
+        return PatternMatch(
+            id: instanceId,
+            patternId: patternId,
             patternType: patternType,
             prompt: prompt,
-            matchedText: "",
             actions: actions,
-            matchPosition: 0
+            revision: revision
         )
-        return .patternMatch(match)
     }
 
     static func decodeSessions(from data: Data) -> [SessionInfo] {
