@@ -44,7 +44,7 @@ struct PairingView: View {
                     TextField("Product ID", text: $productId)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    TextField("Device ID", text: $deviceId)
+                    TextField("Agent ID", text: $deviceId)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     TextField("Username", text: $username)
@@ -81,7 +81,7 @@ struct PairingView: View {
                     .disabled(!canPair || isPairing)
                 }
             }
-            .navigationTitle("Add Device")
+            .navigationTitle("Add Agent")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -124,7 +124,7 @@ struct PairingView: View {
 
         // Check if already paired
         if bookmarkStore.bookmark(for: info.deviceId) != nil {
-            errorMessage = "Already paired with this device."
+            errorMessage = "Already paired with this agent."
             return
         }
 

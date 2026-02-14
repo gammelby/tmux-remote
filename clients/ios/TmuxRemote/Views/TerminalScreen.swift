@@ -61,7 +61,7 @@ struct TerminalScreen: View {
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
-                            Text("Devices")
+                            Text("Agents")
                         }
                         .font(.caption)
                         .fontWeight(.medium)
@@ -341,7 +341,7 @@ struct TerminalScreen: View {
                 Button {
                     dismissToDevices()
                 } label: {
-                    Text("Back to Devices")
+                    Text("Back to Agents")
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .padding(.horizontal, 16)

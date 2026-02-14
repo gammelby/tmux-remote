@@ -35,7 +35,7 @@ struct DeviceListView: View {
                 deviceList
             }
         }
-        .navigationTitle("Devices")
+        .navigationTitle("Agents")
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
@@ -211,7 +211,7 @@ struct DeviceListView: View {
             .padding(.leading, 24)
 
         case .offline:
-            Text("Device unreachable")
+            Text("Agent unreachable")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .padding(.leading, 24)
