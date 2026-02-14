@@ -126,12 +126,19 @@ void nabtoshell_prompt_lifecycle_process(nabtoshell_prompt_lifecycle* lifecycle,
     nabtoshell_prompt_instance_reset(&incoming);
 
     bool has_incoming = false;
+    bool suppressed_incoming = false;
     if (candidate != NULL) {
         has_incoming = candidate_to_instance_with_id(candidate, &incoming);
         if (has_incoming && is_suppressed(lifecycle, incoming.instance_id)) {
             nabtoshell_prompt_instance_free(&incoming);
             has_incoming = false;
+            suppressed_incoming = true;
         }
+    }
+
+    if (has_incoming && lifecycle->suppress_resolved) {
+        lifecycle->suppress_resolved = false;
+        lifecycle->resolved_instance_id[0] = '\0';
     }
 
     if (!lifecycle->has_active) {
@@ -149,7 +156,7 @@ void nabtoshell_prompt_lifecycle_process(nabtoshell_prompt_lifecycle* lifecycle,
             return;
         }
 
-        if (lifecycle->suppress_resolved) {
+        if (lifecycle->suppress_resolved && !suppressed_incoming) {
             lifecycle->suppress_resolved = false;
             lifecycle->resolved_instance_id[0] = '\0';
         }

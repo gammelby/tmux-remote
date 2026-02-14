@@ -108,10 +108,13 @@ START_TEST(test_resolve_suppresses_same_instance)
     nabtoshell_prompt_lifecycle_process(&lifecycle, &c1, 2);
     ck_assert_int_eq(log.count, 2);
 
-    nabtoshell_prompt_lifecycle_process(&lifecycle, NULL, 3);
+    nabtoshell_prompt_lifecycle_process(&lifecycle, &c1, 3);
     ck_assert_int_eq(log.count, 2);
 
-    nabtoshell_prompt_lifecycle_process(&lifecycle, &c1, 4);
+    nabtoshell_prompt_lifecycle_process(&lifecycle, NULL, 4);
+    ck_assert_int_eq(log.count, 2);
+
+    nabtoshell_prompt_lifecycle_process(&lifecycle, &c1, 5);
     ck_assert_int_eq(log.count, 3);
     ck_assert_int_eq(log.types[2], NABTOSHELL_PROMPT_EVENT_PRESENT);
 
