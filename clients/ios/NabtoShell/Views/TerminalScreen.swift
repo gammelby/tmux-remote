@@ -51,7 +51,7 @@ struct TerminalScreen: View {
                 }
             )
             .ignoresSafeArea(.container, edges: .bottom)
-            .allowsHitTesting(patternEngine.activeMatch == nil)
+            .allowsHitTesting(patternEngine.visibleMatch == nil)
             .accessibilityIdentifier("terminal-view")
 
             VStack {
@@ -81,10 +81,34 @@ struct TerminalScreen: View {
                         .padding(.trailing, 12)
                         .padding(.top, 8)
                 }
+
+                if patternEngine.canRestoreHiddenMatch {
+                    HStack {
+                        Spacer()
+                        Button {
+                            patternEngine.restoreOverlay()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.clockwise")
+                                Text("Show prompt")
+                            }
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.gray.opacity(0.6))
+                            .foregroundColor(.white)
+                            .clipShape(Capsule())
+                        }
+                        .accessibilityIdentifier("pattern-recall-pill")
+                        .padding(.trailing, 12)
+                        .padding(.top, 8)
+                    }
+                }
                 Spacer()
             }
 
-            if let match = patternEngine.activeMatch {
+            if let match = patternEngine.visibleMatch {
                 Color.black.opacity(0.001)
                     .ignoresSafeArea()
                     .accessibilityIdentifier("pattern-overlay-backdrop")
@@ -108,12 +132,7 @@ struct TerminalScreen: View {
                             overlayDragBase = .zero
                         },
                         onDismiss: {
-                            patternEngine.resolveLocally(instanceId: match.id)
-                            connectionManager.sendPatternResolve(
-                                deviceId: bookmark.deviceId,
-                                instanceId: match.id,
-                                decision: "dismiss"
-                            )
+                            patternEngine.dismissLocally(instanceId: match.id)
                             overlayOffset = .zero
                             overlayDragBase = .zero
                         }
@@ -133,7 +152,7 @@ struct TerminalScreen: View {
                         }
                 )
                 .transition(.move(edge: .bottom))
-                .animation(.easeInOut(duration: 0.2), value: patternEngine.activeMatch != nil)
+                .animation(.easeInOut(duration: 0.2), value: patternEngine.visibleMatch != nil)
             }
 
             #if DEBUG
@@ -141,7 +160,7 @@ struct TerminalScreen: View {
                 .frame(width: 0, height: 0)
                 .opacity(0)
                 .accessibilityIdentifier("debug-sent-keys")
-            Text("match:\(patternEngine.activeMatch?.id ?? "nil") err:\(showError) done:\(initialConnectionDone)")
+            Text("match:\(patternEngine.activeMatch?.id ?? "nil") hidden:\(patternEngine.canRestoreHiddenMatch) err:\(showError) done:\(initialConnectionDone)")
                 .frame(width: 0, height: 0)
                 .opacity(0)
                 .accessibilityIdentifier("debug-pattern-state")

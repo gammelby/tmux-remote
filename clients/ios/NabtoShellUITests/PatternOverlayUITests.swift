@@ -128,6 +128,18 @@ final class PatternOverlayUITests: XCTestCase {
         XCTFail("Pattern overlay should disappear within \(timeout)s")
     }
 
+    @discardableResult
+    private func waitForRecallPill(timeout: TimeInterval = 5) -> XCUIElement {
+        let pill = app.buttons["pattern-recall-pill"]
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if pill.exists { return pill }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTFail("Recall pill should appear within \(timeout)s")
+        return pill
+    }
+
     private func button(label: String) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch
     }
@@ -174,6 +186,22 @@ final class PatternOverlayUITests: XCTestCase {
         XCTAssertTrue(dismiss.exists)
         tapButton(dismiss)
         waitForOverlayDismissed()
+        XCTAssertTrue(waitForRecallPill().exists)
+    }
+
+    func testDismissThenShowPromptRestoresOverlay() throws {
+        launchStub(script: Self.numberedMenuScript)
+        waitForTerminal()
+        waitForOverlay()
+
+        let dismiss = button(label: "Dismiss")
+        XCTAssertTrue(dismiss.exists)
+        tapButton(dismiss)
+        waitForOverlayDismissed()
+
+        let recall = waitForRecallPill()
+        tapButton(recall)
+        waitForOverlay()
     }
 
     func testYesNoOverlayAppears() throws {

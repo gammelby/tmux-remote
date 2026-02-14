@@ -83,6 +83,40 @@ final class PatternEngineTests: XCTestCase {
         XCTAssertNil(engine.activeMatch)
     }
 
+    func testDismissLocallyHidesOverlayButRetainsMatch() {
+        let engine = makeEngine()
+        engine.applyServerPresent(makeMatch(instanceId: "inst-1", revision: 1))
+
+        engine.dismissLocally(instanceId: "inst-1")
+
+        XCTAssertNotNil(engine.activeMatch)
+        XCTAssertNil(engine.visibleMatch)
+        XCTAssertTrue(engine.canRestoreHiddenMatch)
+    }
+
+    func testRestoreOverlayShowsHiddenMatchAgain() {
+        let engine = makeEngine()
+        engine.applyServerPresent(makeMatch(instanceId: "inst-1", revision: 1))
+        engine.dismissLocally(instanceId: "inst-1")
+
+        engine.restoreOverlay()
+
+        XCTAssertNotNil(engine.visibleMatch)
+        XCTAssertFalse(engine.canRestoreHiddenMatch)
+    }
+
+    func testNewPresentClearsHiddenState() {
+        let engine = makeEngine()
+        engine.applyServerPresent(makeMatch(instanceId: "inst-1", revision: 1))
+        engine.dismissLocally(instanceId: "inst-1")
+
+        engine.applyServerPresent(makeMatch(instanceId: "inst-2", revision: 1))
+
+        XCTAssertEqual(engine.activeMatch?.id, "inst-2")
+        XCTAssertEqual(engine.visibleMatch?.id, "inst-2")
+        XCTAssertFalse(engine.canRestoreHiddenMatch)
+    }
+
     func testResetClearsActiveMatch() {
         let engine = makeEngine()
         engine.applyServerPresent(makeMatch())
@@ -90,6 +124,8 @@ final class PatternEngineTests: XCTestCase {
         engine.reset()
 
         XCTAssertNil(engine.activeMatch)
+        XCTAssertNil(engine.visibleMatch)
+        XCTAssertFalse(engine.canRestoreHiddenMatch)
     }
 
     func testGoneIsDebouncedImmediatelyAfterPresent() {

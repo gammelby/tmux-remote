@@ -3,9 +3,21 @@ import Foundation
 @Observable
 class PatternEngine {
     private(set) var activeMatch: PatternMatch?
+    private(set) var isOverlayHidden = false
     private let minimumVisibleDuration: TimeInterval
     private let now: () -> Date
     private var activeSince: Date?
+
+    var visibleMatch: PatternMatch? {
+        if isOverlayHidden {
+            return nil
+        }
+        return activeMatch
+    }
+
+    var canRestoreHiddenMatch: Bool {
+        return isOverlayHidden && activeMatch != nil
+    }
 
     init(minimumVisibleDuration: TimeInterval = 1.0,
          now: @escaping () -> Date = Date.init)
@@ -16,6 +28,7 @@ class PatternEngine {
 
     func applyServerPresent(_ match: PatternMatch) {
         activeMatch = match
+        isOverlayHidden = false
         activeSince = now()
     }
 
@@ -39,20 +52,37 @@ class PatternEngine {
             return
         }
 
-        activeMatch = nil
-        activeSince = nil
+        clearState()
+    }
+
+    func dismissLocally(instanceId: String) {
+        guard activeMatch?.id == instanceId else {
+            return
+        }
+        isOverlayHidden = true
+    }
+
+    func restoreOverlay() {
+        guard activeMatch != nil else {
+            return
+        }
+        isOverlayHidden = false
     }
 
     func resolveLocally(instanceId: String) {
         guard activeMatch?.id == instanceId else {
             return
         }
-        activeMatch = nil
-        activeSince = nil
+        clearState()
     }
 
     func reset() {
+        clearState()
+    }
+
+    private func clearState() {
         activeMatch = nil
+        isOverlayHidden = false
         activeSince = nil
     }
 }
