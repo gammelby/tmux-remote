@@ -5,14 +5,14 @@
 #include <arpa/inet.h>
 #include <tinycbor/cbor.h>
 
-#include "nabtoshell_prompt_protocol.h"
+#include "tmuxremote_prompt_protocol.h"
 
-static void build_test_instance(nabtoshell_prompt_instance* instance)
+static void build_test_instance(tmuxremote_prompt_instance* instance)
 {
-    nabtoshell_prompt_instance_reset(instance);
+    tmuxremote_prompt_instance_reset(instance);
     strncpy(instance->instance_id, "abc123", sizeof(instance->instance_id) - 1);
     instance->pattern_id = strdup("rule-1");
-    instance->pattern_type = NABTOSHELL_PROMPT_TYPE_YES_NO;
+    instance->pattern_type = TMUXREMOTE_PROMPT_TYPE_YES_NO;
     instance->prompt = strdup("Continue?");
     instance->actions[0].label = strdup("Yes");
     instance->actions[0].keys = strdup("y");
@@ -58,11 +58,11 @@ static char* decode_type_field(const uint8_t* framed, size_t len)
 
 START_TEST(test_encode_present_update_gone)
 {
-    nabtoshell_prompt_instance instance;
+    tmuxremote_prompt_instance instance;
     build_test_instance(&instance);
 
     size_t len = 0;
-    uint8_t* present = nabtoshell_prompt_protocol_encode_present(&instance, &len);
+    uint8_t* present = tmuxremote_prompt_protocol_encode_present(&instance, &len);
     ck_assert_ptr_nonnull(present);
     ck_assert_int_gt((int)len, 4);
 
@@ -73,7 +73,7 @@ START_TEST(test_encode_present_update_gone)
 
     free(present);
 
-    uint8_t* update = nabtoshell_prompt_protocol_encode_update(&instance, &len);
+    uint8_t* update = tmuxremote_prompt_protocol_encode_update(&instance, &len);
     ck_assert_ptr_nonnull(update);
     type = decode_type_field(update, len);
     ck_assert_ptr_nonnull(type);
@@ -81,7 +81,7 @@ START_TEST(test_encode_present_update_gone)
     free(type);
     free(update);
 
-    uint8_t* gone = nabtoshell_prompt_protocol_encode_gone("abc123", &len);
+    uint8_t* gone = tmuxremote_prompt_protocol_encode_gone("abc123", &len);
     ck_assert_ptr_nonnull(gone);
     type = decode_type_field(gone, len);
     ck_assert_ptr_nonnull(type);
@@ -89,7 +89,7 @@ START_TEST(test_encode_present_update_gone)
     free(type);
     free(gone);
 
-    nabtoshell_prompt_instance_free(&instance);
+    tmuxremote_prompt_instance_free(&instance);
 }
 END_TEST
 
@@ -117,13 +117,13 @@ START_TEST(test_decode_resolve)
     memcpy(framed, &be, 4);
     memcpy(framed + 4, payload, payload_len);
 
-    nabtoshell_prompt_resolve_message msg;
-    ck_assert(nabtoshell_prompt_protocol_decode_resolve(framed, payload_len + 4, &msg));
+    tmuxremote_prompt_resolve_message msg;
+    ck_assert(tmuxremote_prompt_protocol_decode_resolve(framed, payload_len + 4, &msg));
     ck_assert_str_eq(msg.instance_id, "abc123");
     ck_assert_str_eq(msg.decision, "action");
     ck_assert_str_eq(msg.keys, "1\n");
 
-    nabtoshell_prompt_protocol_free_resolve(&msg);
+    tmuxremote_prompt_protocol_free_resolve(&msg);
 }
 END_TEST
 

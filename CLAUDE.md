@@ -4,7 +4,7 @@ Read DESIGN.md before starting any work. It is the source of truth for architect
 
 ## Project overview
 
-NabtoShell is a secure remote terminal tool using Nabto Edge P2P connectivity. It exposes tmux sessions on a machine to authenticated clients without SSH, port forwarding, or firewall configuration.
+TmuxRemote is a secure remote terminal tool using Nabto Edge P2P connectivity. It exposes tmux sessions on a machine to authenticated clients without SSH, port forwarding, or firewall configuration.
 
 The repo contains three components that share no source code:
 
@@ -36,7 +36,7 @@ The Nabto Client SDK is fetched automatically via CMake FetchContent. No externa
 
 ### iOS app
 
-Open `clients/ios/NabtoShell.xcodeproj` in Xcode. NabtoEdgeClientSwift is managed via CocoaPods.
+Open `clients/ios/TmuxRemote.xcodeproj` in Xcode. NabtoEdgeClientSwift is managed via CocoaPods.
 
 ## Architecture rules
 
@@ -47,7 +47,7 @@ Open `clients/ios/NabtoShell.xcodeproj` in Xcode. NabtoEdgeClientSwift is manage
 
 ## Security model
 
-This is critical. NabtoShell grants remote shell access. A compromise means arbitrary command execution.
+This is critical. TmuxRemote grants remote shell access. A compromise means arbitrary command execution.
 
 - Single IAM role: Owner. Full access or no access. Do not add "limited" roles.
 - Password Invite Pairing only. Pairing is closed after each invitation is consumed. No open pairing modes in normal operation. `--demo-init` is the only exception and must print a warning.
@@ -92,8 +92,8 @@ clients/
     src/
 
   ios/
-    NabtoShell.xcodeproj/
-    NabtoShell/
+    TmuxRemote.xcodeproj/
+    TmuxRemote/
 
 DESIGN.md
 CLAUDE.md
@@ -119,7 +119,7 @@ Phase 1 (agent + CLI client) and Phase 2a (iOS app with pattern overlays) are co
 The Nabto core runs its own event loop thread. All future callbacks execute on that thread.
 
 - A callback function must never make blocking calls (pthread_join, waitpid, blocking write, contested mutex). This freezes the entire SDK.
-- Defer blocking work to a separate thread. See existing patterns: `cleanup_thread_func` in `nabtoshell_stream.c`, worker threads in `nabtoshell_coap_handler.c`.
+- Defer blocking work to a separate thread. See existing patterns: `cleanup_thread_func` in `tmuxremote_stream.c`, worker threads in `tmuxremote_coap_handler.c`.
 - This applies to both agent (C) and iOS client (Swift): Nabto SDK callbacks dispatch to the core thread. No synchronous I/O or long computation in these callbacks.
 
 ### Shutdown sequence

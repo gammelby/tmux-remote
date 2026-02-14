@@ -28,7 +28,7 @@ def paired_client_home(config):
 @pytest.fixture(scope="session")
 def paired_env(paired_client_home):
     """Environment dict pointing at the pre-paired client home."""
-    return {"NABTOSHELL_HOME": paired_client_home}
+    return {"TMUX_REMOTE_HOME": paired_client_home}
 
 
 @pytest.fixture

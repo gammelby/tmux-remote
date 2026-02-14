@@ -1,131 +1,131 @@
 #include <check.h>
 #include <string.h>
 
-#include "nabtoshell_terminal_state.h"
+#include "tmuxremote_terminal_state.h"
 
 START_TEST(test_basic_render)
 {
-    nabtoshell_terminal_state state;
-    nabtoshell_terminal_state_init(&state, 5, 20);
+    tmuxremote_terminal_state state;
+    tmuxremote_terminal_state_init(&state, 5, 20);
 
     const char* text = "hello\nworld";
-    nabtoshell_terminal_state_feed(&state, (const uint8_t*)text, strlen(text));
+    tmuxremote_terminal_state_feed(&state, (const uint8_t*)text, strlen(text));
 
-    nabtoshell_terminal_snapshot snap;
-    ck_assert(nabtoshell_terminal_state_snapshot(&state, &snap));
+    tmuxremote_terminal_snapshot snap;
+    ck_assert(tmuxremote_terminal_state_snapshot(&state, &snap));
 
     ck_assert_str_eq(snap.lines[0], "hello");
     ck_assert_str_eq(snap.lines[1], "world");
 
-    nabtoshell_terminal_snapshot_free(&snap);
-    nabtoshell_terminal_state_free(&state);
+    tmuxremote_terminal_snapshot_free(&snap);
+    tmuxremote_terminal_state_free(&state);
 }
 END_TEST
 
 START_TEST(test_cursor_positioning)
 {
-    nabtoshell_terminal_state state;
-    nabtoshell_terminal_state_init(&state, 6, 20);
+    tmuxremote_terminal_state state;
+    tmuxremote_terminal_state_init(&state, 6, 20);
 
     const char* text = "\x1b[4;2HChoose\x1b[5;2H1. Yes\x1b[6;2H2. No";
-    nabtoshell_terminal_state_feed(&state, (const uint8_t*)text, strlen(text));
+    tmuxremote_terminal_state_feed(&state, (const uint8_t*)text, strlen(text));
 
-    nabtoshell_terminal_snapshot snap;
-    ck_assert(nabtoshell_terminal_state_snapshot(&state, &snap));
+    tmuxremote_terminal_snapshot snap;
+    ck_assert(tmuxremote_terminal_state_snapshot(&state, &snap));
 
     ck_assert_str_eq(snap.lines[3], " Choose");
     ck_assert_str_eq(snap.lines[4], " 1. Yes");
     ck_assert_str_eq(snap.lines[5], " 2. No");
 
-    nabtoshell_terminal_snapshot_free(&snap);
-    nabtoshell_terminal_state_free(&state);
+    tmuxremote_terminal_snapshot_free(&snap);
+    tmuxremote_terminal_state_free(&state);
 }
 END_TEST
 
 START_TEST(test_chunked_csi_sequence)
 {
-    nabtoshell_terminal_state state;
-    nabtoshell_terminal_state_init(&state, 4, 20);
+    tmuxremote_terminal_state state;
+    tmuxremote_terminal_state_init(&state, 4, 20);
 
     const uint8_t part1[] = {0x1b, '[', '2', ';'};
     const uint8_t part2[] = {'1', 'H', 'O', 'K'};
 
-    nabtoshell_terminal_state_feed(&state, part1, sizeof(part1));
-    nabtoshell_terminal_state_feed(&state, part2, sizeof(part2));
+    tmuxremote_terminal_state_feed(&state, part1, sizeof(part1));
+    tmuxremote_terminal_state_feed(&state, part2, sizeof(part2));
 
-    nabtoshell_terminal_snapshot snap;
-    ck_assert(nabtoshell_terminal_state_snapshot(&state, &snap));
+    tmuxremote_terminal_snapshot snap;
+    ck_assert(tmuxremote_terminal_state_snapshot(&state, &snap));
 
     ck_assert_str_eq(snap.lines[1], "OK");
 
-    nabtoshell_terminal_snapshot_free(&snap);
-    nabtoshell_terminal_state_free(&state);
+    tmuxremote_terminal_snapshot_free(&snap);
+    tmuxremote_terminal_state_free(&state);
 }
 END_TEST
 
 START_TEST(test_resize_expands_cursor_addressable_area)
 {
-    nabtoshell_terminal_state state;
-    nabtoshell_terminal_state_init(&state, 4, 10);
+    tmuxremote_terminal_state state;
+    tmuxremote_terminal_state_init(&state, 4, 10);
 
     const char* before = "\x1b[5;1HX";
-    nabtoshell_terminal_state_feed(&state, (const uint8_t*)before, strlen(before));
+    tmuxremote_terminal_state_feed(&state, (const uint8_t*)before, strlen(before));
 
-    nabtoshell_terminal_snapshot snap_before;
-    ck_assert(nabtoshell_terminal_state_snapshot(&state, &snap_before));
+    tmuxremote_terminal_snapshot snap_before;
+    ck_assert(tmuxremote_terminal_state_snapshot(&state, &snap_before));
     ck_assert_str_eq(snap_before.lines[3], "X");
-    nabtoshell_terminal_snapshot_free(&snap_before);
+    tmuxremote_terminal_snapshot_free(&snap_before);
 
-    nabtoshell_terminal_state_resize(&state, 8, 20);
+    tmuxremote_terminal_state_resize(&state, 8, 20);
 
     const char* after = "\x1b[5;1HY";
-    nabtoshell_terminal_state_feed(&state, (const uint8_t*)after, strlen(after));
+    tmuxremote_terminal_state_feed(&state, (const uint8_t*)after, strlen(after));
 
-    nabtoshell_terminal_snapshot snap_after;
-    ck_assert(nabtoshell_terminal_state_snapshot(&state, &snap_after));
+    tmuxremote_terminal_snapshot snap_after;
+    ck_assert(tmuxremote_terminal_state_snapshot(&state, &snap_after));
 
     ck_assert_str_eq(snap_after.lines[3], "X");
     ck_assert_str_eq(snap_after.lines[4], "Y");
 
-    nabtoshell_terminal_snapshot_free(&snap_after);
-    nabtoshell_terminal_state_free(&state);
+    tmuxremote_terminal_snapshot_free(&snap_after);
+    tmuxremote_terminal_state_free(&state);
 }
 END_TEST
 
 START_TEST(test_esc_charset_sequence_is_consumed)
 {
-    nabtoshell_terminal_state state;
-    nabtoshell_terminal_state_init(&state, 4, 30);
+    tmuxremote_terminal_state state;
+    tmuxremote_terminal_state_init(&state, 4, 30);
 
     const char* text = "read /etc\x1b(B/passwd";
-    nabtoshell_terminal_state_feed(&state, (const uint8_t*)text, strlen(text));
+    tmuxremote_terminal_state_feed(&state, (const uint8_t*)text, strlen(text));
 
-    nabtoshell_terminal_snapshot snap;
-    ck_assert(nabtoshell_terminal_state_snapshot(&state, &snap));
+    tmuxremote_terminal_snapshot snap;
+    ck_assert(tmuxremote_terminal_state_snapshot(&state, &snap));
     ck_assert_str_eq(snap.lines[0], "read /etc/passwd");
 
-    nabtoshell_terminal_snapshot_free(&snap);
-    nabtoshell_terminal_state_free(&state);
+    tmuxremote_terminal_snapshot_free(&snap);
+    tmuxremote_terminal_state_free(&state);
 }
 END_TEST
 
 START_TEST(test_csi_x_erases_characters_without_moving_cursor)
 {
-    nabtoshell_terminal_state state;
-    nabtoshell_terminal_state_init(&state, 4, 40);
+    tmuxremote_terminal_state state;
+    tmuxremote_terminal_state_init(&state, 4, 40);
 
     const char* text =
         "\x1b[1;1HABCDEFGHIJ"
         "\x1b[1;3H\x1b[2X"
         "\x1b[1;3H12";
-    nabtoshell_terminal_state_feed(&state, (const uint8_t*)text, strlen(text));
+    tmuxremote_terminal_state_feed(&state, (const uint8_t*)text, strlen(text));
 
-    nabtoshell_terminal_snapshot snap;
-    ck_assert(nabtoshell_terminal_state_snapshot(&state, &snap));
+    tmuxremote_terminal_snapshot snap;
+    ck_assert(tmuxremote_terminal_state_snapshot(&state, &snap));
     ck_assert_str_eq(snap.lines[0], "AB12EFGHIJ");
 
-    nabtoshell_terminal_snapshot_free(&snap);
-    nabtoshell_terminal_state_free(&state);
+    tmuxremote_terminal_snapshot_free(&snap);
+    tmuxremote_terminal_state_free(&state);
 }
 END_TEST
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(NabtoShellCLI C)
+project(TmuxRemoteCLI C)
 
 if(POLICY CMP0135)
   cmake_policy(SET CMP0135 NEW)
@@ -36,20 +36,20 @@ target_include_directories(tinycbor_lib PUBLIC ${tinycbor_SOURCE_DIR}/src)
 
 set(src
   src/main.c
-  src/nabtoshell_pair.c
-  src/nabtoshell_attach.c
-  src/nabtoshell_sessions.c
-  src/nabtoshell_devices.c
-  src/nabtoshell_rename.c
-  src/nabtoshell_client_config.c
-  src/nabtoshell_client_coap.c
-  src/nabtoshell_client_util.c
+  src/tmuxremote_pair.c
+  src/tmuxremote_attach.c
+  src/tmuxremote_sessions.c
+  src/tmuxremote_devices.c
+  src/tmuxremote_rename.c
+  src/tmuxremote_client_config.c
+  src/tmuxremote_client_coap.c
+  src/tmuxremote_client_util.c
   src/3rdparty/cjson/cJSON.c
 )
 
-add_executable(nabtoshell ${src})
+add_executable(tmux-remote ${src})
 
-target_include_directories(nabtoshell PRIVATE
+target_include_directories(tmux-remote PRIVATE
   ${nabto_client_sdk_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -60,17 +60,17 @@ elseif(UNIX)
   set(NABTO_CLIENT_SDK_LIB_DIR ${nabto_client_sdk_SOURCE_DIR}/lib/linux-x86_64)
 endif()
 
-target_link_directories(nabtoshell PRIVATE ${NABTO_CLIENT_SDK_LIB_DIR})
+target_link_directories(tmux-remote PRIVATE ${NABTO_CLIENT_SDK_LIB_DIR})
 
-target_link_libraries(nabtoshell
+target_link_libraries(tmux-remote
   nabto_client
   tinycbor_lib
   Threads::Threads
 )
 
-set_target_properties(nabtoshell PROPERTIES
+set_target_properties(tmux-remote PROPERTIES
   BUILD_RPATH "${NABTO_CLIENT_SDK_LIB_DIR}"
   INSTALL_RPATH "${NABTO_CLIENT_SDK_LIB_DIR}"
 )
 
-install(TARGETS nabtoshell RUNTIME DESTINATION bin)
+install(TARGETS tmux-remote RUNTIME DESTINATION bin)

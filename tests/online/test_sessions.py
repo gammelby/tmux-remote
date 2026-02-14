@@ -15,7 +15,7 @@ from helpers import run_cli
 def test_sessions_lists_known_session(paired_env, cli_binary):
     """After creating a tmux session, 'sessions' should list it."""
     env = paired_env
-    session_name = "nabtoshell_test_sess"
+    session_name = "tmuxremote_test_sess"
 
     subprocess.run(["tmux", "new-session", "-d", "-s", session_name],
                    check=False)

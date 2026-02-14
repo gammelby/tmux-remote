@@ -1,8 +1,8 @@
 {
     "product_id": "pr-xxxxxxxx",
     "device_id": "de-xxxxxxxx",
-    "agent_binary": "/absolute/path/to/nabtoshell-agent",
-    "cli_binary": "/absolute/path/to/nabtoshell",
+    "agent_binary": "/absolute/path/to/tmux-remote-agent",
+    "cli_binary": "/absolute/path/to/tmux-remote",
     "agent_home_dir": "/absolute/path/to/.test/agent_home",
     "client_home_dir": "/absolute/path/to/.test/client_home"
 }

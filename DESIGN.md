@@ -1,15 +1,15 @@
-# NabtoShell Design
+# tmux-remote Design
 
 ## 1. System Overview
 
-NabtoShell provides secure remote terminal access to tmux sessions using Nabto Edge peer-to-peer connectivity. It replaces SSH with a zero-configuration model: no port forwarding, firewall rules, or dynamic DNS. A lightweight agent runs on the host machine and relays PTY I/O over encrypted Nabto connections to authenticated clients.
+tmux-remote provides secure remote terminal access to tmux sessions using Nabto Edge peer-to-peer connectivity. It replaces SSH with a zero-configuration model: no port forwarding, firewall rules, or dynamic DNS. A lightweight agent runs on the host machine and relays PTY I/O over encrypted Nabto connections to authenticated clients.
 
 ```
  iOS App / CLI Client
        |
   [Nabto Edge P2P / DTLS]
        |
-   NabtoShell Agent
+   tmux-remote Agent
        |
    tmux session <-> PTY
 ```
@@ -51,11 +51,11 @@ CoAP and stream protocols are separate:
 
 ## 4. Security Model
 
-NabtoShell grants remote shell access. A compromise means an attacker can execute arbitrary commands as the user running the agent. This is equivalent to SSH access, and the security posture must match or exceed SSH.
+tmux-remote grants remote shell access. A compromise means an attacker can execute arbitrary commands as the user running the agent. This is equivalent to SSH access, and the security posture must match or exceed SSH.
 
 - **Single role: Owner.** Full access or no access. No "limited" roles. A multi-role model would be security theater for a remote shell.
 - **Password Invite pairing only.** A one-time password is generated per invitation and closed after use. No other pairing mode is enabled.
-- **Every endpoint checks IAM.** CoAP handlers and stream listeners call `nabtoshell_iam_check_access()`/`nabtoshell_iam_check_access_ref()` before processing. Unpaired connections can only access pairing endpoints.
+- **Every endpoint checks IAM.** CoAP handlers and stream listeners call `tmuxremote_iam_check_access()`/`tmuxremote_iam_check_access_ref()` before processing. Unpaired connections can only access pairing endpoints.
 - **DTLS with ECC.** All traffic is encrypted end-to-end by the Nabto platform. The basestation mediates connection setup but cannot decrypt traffic.
 
 ### Security Properties
@@ -68,7 +68,7 @@ NabtoShell grants remote shell access. A compromise means an attacker can execut
 
 ### Comparison with SSH
 
-| Property | SSH | NabtoShell |
+| Property | SSH | tmux-remote |
 |----------|-----|------------|
 | Key exchange | `ssh-keygen` + copy public key to server | Pairing string (one-time password for PAKE key exchange) |
 | Authentication | Public key or password per connection | Public key (after initial pairing) |
@@ -76,7 +76,7 @@ NabtoShell grants remote shell access. A compromise means an attacker can execut
 | Network requirements | Open port 22, firewall rules, possibly dynamic DNS | None. Outbound UDP only. |
 | NAT traversal | Requires port forwarding or relay (ngrok, etc.) | Built-in P2P hole punching with relay fallback |
 
-The trust model is identical: both rely on a one-time key exchange followed by public key authentication. NabtoShell's pairing is arguably more user-friendly than SSH's `ssh-copy-id` workflow, while providing the same cryptographic guarantees.
+The trust model is identical: both rely on a one-time key exchange followed by public key authentication. tmux-remote's pairing is arguably more user-friendly than SSH's `ssh-copy-id` workflow, while providing the same cryptographic guarantees.
 
 ### Pairing Flow
 
@@ -87,16 +87,16 @@ The pairing flow is identical across all clients. The transport is the same (Nab
 3. The user copies it to their client (CLI command or mobile app paste).
 4. The client parses the pairing string, generates a keypair if needed, connects, and completes the PAKE-based key exchange. Public keys are exchanged and stored.
 5. The invitation is consumed. Pairing is now closed. No further clients can pair.
-6. To add another device, run `nabtoshell-agent --add-user <name>` at the server terminal.
+6. To add another device, run `tmux-remote-agent --add-user <name>` at the server terminal.
 
 ### Agent CLI
 
-#### `nabtoshell-agent --init`
+#### `tmux-remote-agent --init`
 
 Interactive first-time setup:
 
 ```
-$ nabtoshell-agent --init
+$ tmux-remote-agent --init
 No configuration found. Creating initial setup.
 
 Product ID: pr-xxxxxxxx
@@ -107,22 +107,22 @@ Fingerprint: 08c955a5f7505f16f03bc3e3e0db89ff56ce571e0dd6be153c5bae9174d62ac6
 
 Register this fingerprint in the Nabto Cloud Console before starting.
 
-Configuration written to ~/.nabtoshell/
+Configuration written to ~/.tmux-remote/
 ```
 
 #### Normal startup (no users paired yet)
 
 ```
-$ nabtoshell-agent
+$ tmux-remote-agent
 
-######## NabtoShell ########
+######## tmux-remote ########
 # Product ID:     pr-xxxxxxxx
 # Device ID:      de-yyyyyyyy
 # Fingerprint:    08c955a5...
 # Version:        0.1.0
 #
 #  No users paired yet. Pair your phone by copying
-#  this string into the NabtoShell app:
+#  this string into the tmux-remote app:
 #
 #  p=pr-xxxxxxxx,d=de-yyyyyyyy,u=owner,pwd=CbAHaqpKKrhK,sct=TUfe3n3hhhM9
 #
@@ -132,15 +132,15 @@ $ nabtoshell-agent
 ######## Waiting for pairing... ########
 ```
 
-#### `nabtoshell-agent --add-user <name>`
+#### `tmux-remote-agent --add-user <name>`
 
 Creates a one-time invitation for an additional client:
 
 ```
-$ nabtoshell-agent --add-user tablet
+$ tmux-remote-agent --add-user tablet
 Created invitation for user 'tablet'.
 
-Copy this string into the NabtoShell app on the new device:
+Copy this string into the tmux-remote app on the new device:
 
   p=pr-xxxxxxxx,d=de-yyyyyyyy,u=tablet,pwd=xK9mRtYwZp3n,sct=Hf7kL2nQwR4s
 
@@ -148,24 +148,24 @@ This invitation can only be used once. Pairing will close
 again after this device pairs.
 ```
 
-#### `nabtoshell-agent --remove-user <name>`
+#### `tmux-remote-agent --remove-user <name>`
 
 Revokes access for a paired user or cancels an unused invitation:
 
 ```
-$ nabtoshell-agent --remove-user tablet
+$ tmux-remote-agent --remove-user tablet
 Removed user 'tablet'. Their public key has been deleted.
 They will no longer be able to connect.
 ```
 
-#### `nabtoshell-agent --demo-init`
+#### `tmux-remote-agent --demo-init`
 
 Removed. The agent enforces invite-only pairing. Use `--init` for first setup and `--add-user` for additional one-time invitations.
 
 ### Agent Configuration Directory
 
 ```
-~/.nabtoshell/
+~/.tmux-remote/
   config/device.json          # Product ID, Device ID, server settings
   config/iam_config.json      # IAM policies, roles (static)
   state/iam_state.json        # Paired users and pending one-time invitations (mutable)
@@ -175,24 +175,24 @@ Removed. The agent enforces invite-only pairing. Use `--init` for first setup an
 
 ## 5. CLI Client
 
-A command-line client for connecting to a NabtoShell agent from another computer. Uses the Nabto Client SDK (binary release). The CLI client is the simplest client and serves as the primary driver for developing and testing the agent. It is a transparent byte pipe: connects, opens a Nabto stream, and relays bytes between the stream and the local terminal's stdin/stdout.
+A command-line client for connecting to a tmux-remote agent from another computer. Uses the Nabto Client SDK (binary release). The CLI client is the simplest client and serves as the primary driver for developing and testing the agent. It is a transparent byte pipe: connects, opens a Nabto stream, and relays bytes between the stream and the local terminal's stdin/stdout.
 
 ### Usage
 
 ```
-nabtoshell pair <pairing-string>                    # One-time pairing
-nabtoshell attach <device-name> [session]            # Attach to existing tmux session
-nabtoshell create <device-name> [session] [command]  # Create new session, optionally run command
-nabtoshell sessions <device-name>                    # List tmux sessions
-nabtoshell devices                                   # List saved devices
-nabtoshell rename <device-name> <new-name>           # Rename a saved device
+tmux-remote pair <pairing-string>                    # One-time pairing
+tmux-remote attach <device-name> [session]            # Attach to existing tmux session
+tmux-remote create <device-name> [session] [command]  # Create new session, optionally run command
+tmux-remote sessions <device-name>                    # List tmux sessions
+tmux-remote devices                                   # List saved devices
+tmux-remote rename <device-name> <new-name>           # Rename a saved device
 ```
 
 Aliases: `a` for `attach`, `c`/`n`/`new`/`new-session` for `create`.
 
 ### Attach/Create Flow
 
-1. Look up device bookmark from `~/.nabtoshell-client/` by name.
+1. Look up device bookmark from `~/.tmux-remote-client/` by name.
 2. Create a Nabto client connection with stored product ID, device ID, client private key, and SCT.
 3. `nabto_client_connection_connect()`.
 4. Send `POST /terminal/attach` or `POST /terminal/create` over CoAP (CBOR payload) with session name and terminal dimensions from `ioctl(TIOCGWINSZ)`.
@@ -205,7 +205,7 @@ Aliases: `a` for `attach`, `c`/`n`/`new`/`new-session` for `create`.
 ### Client Configuration
 
 ```
-~/.nabtoshell-client/
+~/.tmux-remote-client/
   client.key              # Client private key
   devices.json            # Saved device bookmarks
 ```
@@ -345,7 +345,7 @@ This eliminates stale prompt copies from detection logic because only the curren
 
 ### 7.4 Prompt Rule Configuration
 
-Rules are loaded from `~/.nabtoshell/patterns/*.json` at startup.
+Rules are loaded from `~/.tmux-remote/patterns/*.json` at startup.
 
 Config schema is V3 only (single format, no compatibility branches):
 
@@ -370,7 +370,7 @@ Config schema is V3 only (single format, no compatibility branches):
 ```
 
 Load behavior:
-- all `*.json` files in `~/.nabtoshell/patterns/` are loaded in lexical filename order
+- all `*.json` files in `~/.tmux-remote/patterns/` are loaded in lexical filename order
 - agent IDs and pattern IDs must be unique in the merged config
 - any parse/validation error aborts startup
 
@@ -416,7 +416,7 @@ none --present--> active(instance_id, rev=1) ----+
 Rules:
 - `present` is emitted once per new `instance_id`
 - `update` is emitted only for same `instance_id` with changed prompt/actions
-- `gone` is emitted once when instance is absent for `NABTOSHELL_PROMPT_ABSENCE_SNAPSHOTS` snapshots (`8`)
+- `gone` is emitted once when instance is absent for `TMUXREMOTE_PROMPT_ABSENCE_SNAPSHOTS` snapshots (`8`)
 - client resolve suppresses only that exact `instance_id`
 
 ### 7.7 Control Stream Protocol V2
@@ -540,9 +540,9 @@ Replay tests use `.ptyr` recordings (including `pty-log-7/8/9/10`) and chunk-spl
 
 | Parameter | Purpose |
 |-----------|---------|
-| `NABTOSHELL_PROMPT_ABSENCE_SNAPSHOTS` | Snapshot count before emitting `pattern_gone` |
+| `TMUXREMOTE_PROMPT_ABSENCE_SNAPSHOTS` | Snapshot count before emitting `pattern_gone` |
 | `max_scan_lines` (rule config) | How many rows below prompt are scanned for numbered options |
-| `NABTOSHELL_PROMPT_MAX_ACTIONS` | Hard cap for action list size |
+| `TMUXREMOTE_PROMPT_MAX_ACTIONS` | Hard cap for action list size |
 
 ### 7.11 Threading Model
 
@@ -554,7 +554,7 @@ Replay tests use `.ptyr` recordings (including `pty-log-7/8/9/10`) and chunk-spl
 | PTY Reader | `pty_reader_thread` | Reads PTY fd, feeds detector, writes PTY bytes to Nabto stream |
 | Stream Reader | `stream_reader_thread` | Reads Nabto stream, writes to PTY fd |
 
-Prompt detection executes in the PTY reader thread (`nabtoshell_prompt_detector_feed()`), and event callbacks send V2 framed-CBOR messages on the control stream.
+Prompt detection executes in the PTY reader thread (`tmuxremote_prompt_detector_feed()`), and event callbacks send V2 framed-CBOR messages on the control stream.
 
 #### Agent Threads per Control Stream
 
@@ -573,27 +573,27 @@ All Nabto SDK callbacks execute on the SDK core event loop thread. Blocking work
 agent/
   src/
     main.c                               # Entry point, argument parsing
-    nabtoshell.h / .c                    # Main app struct, startup, shutdown
-    nabtoshell_banner.h / .c             # Startup banner output
-    nabtoshell_device.h / .c             # Nabto device setup
-    nabtoshell_init.h / .c               # --init, --add-user, --remove-user logic
-    nabtoshell_stream.h / .c             # Data stream (port 1), PTY relay
-    nabtoshell_control_stream.h / .c     # Control stream (port 2), events
-    nabtoshell_tmux.h / .c               # tmux session utilities
-    nabtoshell_terminal_state.h / .c     # VT parsing and canonical screen snapshots
-    nabtoshell_prompt_rules.h / .c       # Prompt rule evaluation on snapshots
-    nabtoshell_prompt_lifecycle.h / .c   # Instance FSM: present/update/gone/resolved
-    nabtoshell_prompt_detector.h / .c    # End-to-end detector orchestration
-    nabtoshell_pattern_config.h / .c     # JSON config parsing
-    nabtoshell_prompt_protocol.h / .c    # Framed-CBOR protocol for V2 control-stream prompt messages
-    nabtoshell_coap_handler.h / .c       # CoAP endpoint scaffold
-    nabtoshell_coap_attach.c             # POST /terminal/attach handler
-    nabtoshell_coap_create.c             # POST /terminal/create handler
-    nabtoshell_coap_resize.c             # POST /terminal/resize handler
-    nabtoshell_coap_sessions.c           # GET /terminal/sessions handler
-    nabtoshell_coap_status.c             # GET /terminal/status handler
-    nabtoshell_iam.h / .c                # IAM integration
-    nabtoshell_session.h / .c            # Session map
+    tmuxremote.h / .c                    # Main app struct, startup, shutdown
+    tmuxremote_banner.h / .c             # Startup banner output
+    tmuxremote_device.h / .c             # Nabto device setup
+    tmuxremote_init.h / .c               # --init, --add-user, --remove-user logic
+    tmuxremote_stream.h / .c             # Data stream (port 1), PTY relay
+    tmuxremote_control_stream.h / .c     # Control stream (port 2), events
+    tmuxremote_tmux.h / .c               # tmux session utilities
+    tmuxremote_terminal_state.h / .c     # VT parsing and canonical screen snapshots
+    tmuxremote_prompt_rules.h / .c       # Prompt rule evaluation on snapshots
+    tmuxremote_prompt_lifecycle.h / .c   # Instance FSM: present/update/gone/resolved
+    tmuxremote_prompt_detector.h / .c    # End-to-end detector orchestration
+    tmuxremote_pattern_config.h / .c     # JSON config parsing
+    tmuxremote_prompt_protocol.h / .c    # Framed-CBOR protocol for V2 control-stream prompt messages
+    tmuxremote_coap_handler.h / .c       # CoAP endpoint scaffold
+    tmuxremote_coap_attach.c             # POST /terminal/attach handler
+    tmuxremote_coap_create.c             # POST /terminal/create handler
+    tmuxremote_coap_resize.c             # POST /terminal/resize handler
+    tmuxremote_coap_sessions.c           # GET /terminal/sessions handler
+    tmuxremote_coap_status.c             # GET /terminal/status handler
+    tmuxremote_iam.h / .c                # IAM integration
+    tmuxremote_session.h / .c            # Session map
   tests/
     test_terminal_state.c                # VT parser and snapshot normalization tests
     test_prompt_rules.c                  # Rule matching and action extraction tests
@@ -607,9 +607,9 @@ clients/
   cli/
     src/                                 # CLI client (C)
   ios/
-    NabtoShell/
+    TmuxRemote/
       App/
-        NabtoShellApp.swift              # App entry point
+        TmuxRemoteApp.swift              # App entry point
         RootView.swift                   # Root navigation
         AppState.swift                   # App-wide state
       Models/
@@ -641,7 +641,7 @@ clients/
       Resources/
         patterns.json                    # Bundled pattern definitions
 
-~/.nabtoshell/
+~/.tmux-remote/
   config/device.json                     # Product/device IDs
   state/iam_state.json                   # Paired users
   keys/device.key                        # Device private key

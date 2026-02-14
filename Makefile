@@ -7,8 +7,8 @@
 PYTHON        ?= python3
 AGENT_BUILD   = agent/_build
 CLIENT_BUILD  = clients/cli/_build
-AGENT_BIN     = $(AGENT_BUILD)/nabtoshell-agent
-CLIENT_BIN    = $(CLIENT_BUILD)/nabtoshell
+AGENT_BIN     = $(AGENT_BUILD)/tmux-remote-agent
+CLIENT_BIN    = $(CLIENT_BUILD)/tmux-remote
 TEST_DIR      = .test
 TEST_AGENT_HOME = $(TEST_DIR)/agent_home
 TEST_CLIENT_HOME = $(TEST_DIR)/client_home
@@ -99,10 +99,10 @@ setup-test-client: $(CLIENT_BIN)
 		echo "Re-run: make clean-test && make init-test-server ..."; \
 		exit 1; \
 	fi && \
-	CLIENT_ABS=$$(cd clients/cli && pwd)/_build/nabtoshell && \
+	CLIENT_ABS=$$(cd clients/cli && pwd)/_build/tmux-remote && \
 	mkdir -p $(TEST_CLIENT_HOME) && \
 	echo "Pairing client with test server..." && \
-	NABTOSHELL_HOME=$(TEST_CLIENT_HOME) $$CLIENT_ABS pair $$PAIRING_STRING --name default && \
+	TMUX_REMOTE_HOME=$(TEST_CLIENT_HOME) $$CLIENT_ABS pair $$PAIRING_STRING --name default && \
 	echo "" && \
 	echo "Client paired successfully. State saved to $(TEST_CLIENT_HOME)/" && \
 	echo "Run:  make run-tests-online"
@@ -111,8 +111,8 @@ setup-test-client: $(CLIENT_BIN)
 
 define generate_test_config
 	@. $(TEST_ENV) && \
-	AGENT_ABS=$$(cd agent && pwd)/_build/nabtoshell-agent && \
-	CLIENT_ABS=$$(cd clients/cli && pwd)/_build/nabtoshell && \
+	AGENT_ABS=$$(cd agent && pwd)/_build/tmux-remote-agent && \
+	CLIENT_ABS=$$(cd clients/cli && pwd)/_build/tmux-remote && \
 	HOME_ABS=$$(pwd)/$(TEST_AGENT_HOME) && \
 	CLIENT_HOME_ABS=$$(pwd)/$(TEST_CLIENT_HOME) && \
 	printf '{\n  "product_id": "%s",\n  "device_id": "%s",\n  "agent_binary": "%s",\n  "cli_binary": "%s",\n  "agent_home_dir": "%s",\n  "client_home_dir": "%s"\n}\n' \
@@ -181,7 +181,7 @@ test:
 	@echo "  Cleanup: make clean-test"
 
 help:
-	@echo "NabtoShell Makefile"
+	@echo "tmux-remote Makefile"
 	@echo ""
 	@echo "Build:"
 	@echo "  make                          Build both agent and client"

@@ -1,4 +1,4 @@
-name: NabtoShell
+name: TmuxRemote
 options:
   bundleIdPrefix: com.nabto
   deploymentTarget:
@@ -12,36 +12,36 @@ packages:
     url: https://github.com/migueldeicaza/SwiftTerm.git
     from: "1.0.0"
 targets:
-  NabtoShell:
+  TmuxRemote:
     type: application
     platform: iOS
     sources:
-      - NabtoShell
+      - TmuxRemote
     dependencies:
       - package: SwiftTerm
     settings:
-      INFOPLIST_FILE: NabtoShell/Info.plist
+      INFOPLIST_FILE: TmuxRemote/Info.plist
       ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-      PRODUCT_BUNDLE_IDENTIFIER: com.nabto.NabtoShell
+      PRODUCT_BUNDLE_IDENTIFIER: com.nabto.TmuxRemote
       TARGETED_DEVICE_FAMILY: "1,2"
       CODE_SIGN_STYLE: Automatic
-  NabtoShellTests:
+  TmuxRemoteTests:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - NabtoShellTests
+      - TmuxRemoteTests
     dependencies:
-      - target: NabtoShell
+      - target: TmuxRemote
     settings:
-      PRODUCT_BUNDLE_IDENTIFIER: com.nabto.NabtoShellTests
+      PRODUCT_BUNDLE_IDENTIFIER: com.nabto.TmuxRemoteTests
       GENERATE_INFOPLIST_FILE: YES
-  NabtoShellUITests:
+  TmuxRemoteUITests:
     type: bundle.ui-testing
     platform: iOS
     sources:
-      - NabtoShellUITests
+      - TmuxRemoteUITests
     dependencies:
-      - target: NabtoShell
+      - target: TmuxRemote
     settings:
-      PRODUCT_BUNDLE_IDENTIFIER: com.nabto.NabtoShellUITests
+      PRODUCT_BUNDLE_IDENTIFIER: com.nabto.TmuxRemoteUITests
       GENERATE_INFOPLIST_FILE: YES

@@ -11,7 +11,7 @@ from helpers import run_cli
 
 def test_devices_empty(cli_binary, client_home):
     """With no paired devices, 'devices' shows empty list."""
-    env = {"NABTOSHELL_HOME": client_home}
+    env = {"TMUX_REMOTE_HOME": client_home}
     result = run_cli(cli_binary, ["devices"], env_override=env)
     output = result.stdout.decode("utf-8", errors="replace")
 

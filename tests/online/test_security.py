@@ -11,7 +11,7 @@ from helpers import run_cli
 
 def test_attach_without_pairing(cli_binary, client_home):
     """Attaching without pairing should fail (device not in bookmarks)."""
-    env = {"NABTOSHELL_HOME": client_home}
+    env = {"TMUX_REMOTE_HOME": client_home}
     result = run_cli(cli_binary, ["attach", "nonexistent"],
                      env_override=env, timeout=10)
     assert result.returncode != 0
@@ -19,7 +19,7 @@ def test_attach_without_pairing(cli_binary, client_home):
 
 def test_sessions_without_pairing(cli_binary, client_home):
     """Listing sessions without pairing should fail (device not in bookmarks)."""
-    env = {"NABTOSHELL_HOME": client_home}
+    env = {"TMUX_REMOTE_HOME": client_home}
     result = run_cli(cli_binary, ["sessions", "nonexistent"],
                      env_override=env, timeout=10)
     assert result.returncode != 0

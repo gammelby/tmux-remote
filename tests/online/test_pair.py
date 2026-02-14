@@ -12,7 +12,7 @@ from helpers import run_cli
 
 def test_pair_invalid_string(cli_binary, client_home):
     """Pairing with a malformed string fails."""
-    env = {"NABTOSHELL_HOME": client_home}
+    env = {"TMUX_REMOTE_HOME": client_home}
 
     result = run_cli(cli_binary, ["pair", "invalid-string"], env_override=env)
     assert result.returncode != 0

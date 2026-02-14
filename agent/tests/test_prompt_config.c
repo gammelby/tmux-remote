@@ -1,7 +1,7 @@
 #include <check.h>
 #include <string.h>
 
-#include "nabtoshell_pattern_config.h"
+#include "tmuxremote_pattern_config.h"
 
 START_TEST(test_parse_v3_config)
 {
@@ -33,26 +33,26 @@ START_TEST(test_parse_v3_config)
         "  }"
         "}";
 
-    nabtoshell_pattern_config* config =
-        nabtoshell_pattern_config_parse(json, strlen(json));
+    tmuxremote_pattern_config* config =
+        tmuxremote_pattern_config_parse(json, strlen(json));
     ck_assert_ptr_nonnull(config);
     ck_assert_int_eq(config->version, 3);
     ck_assert_int_eq(config->agent_count, 1);
 
-    const nabtoshell_agent_config* agent =
-        nabtoshell_pattern_config_find_agent(config, "agent-a");
+    const tmuxremote_agent_config* agent =
+        tmuxremote_pattern_config_find_agent(config, "agent-a");
     ck_assert_ptr_nonnull(agent);
     ck_assert_int_eq(agent->pattern_count, 2);
 
     ck_assert_str_eq(agent->patterns[0].id, "yes-no");
-    ck_assert_int_eq(agent->patterns[0].type, NABTOSHELL_PROMPT_TYPE_YES_NO);
+    ck_assert_int_eq(agent->patterns[0].type, TMUXREMOTE_PROMPT_TYPE_YES_NO);
     ck_assert_int_eq(agent->patterns[0].action_count, 2);
 
     ck_assert_str_eq(agent->patterns[1].id, "menu");
-    ck_assert_int_eq(agent->patterns[1].type, NABTOSHELL_PROMPT_TYPE_NUMBERED_MENU);
+    ck_assert_int_eq(agent->patterns[1].type, TMUXREMOTE_PROMPT_TYPE_NUMBERED_MENU);
     ck_assert_ptr_nonnull(agent->patterns[1].action_template);
 
-    nabtoshell_pattern_config_free(config);
+    tmuxremote_pattern_config_free(config);
 }
 END_TEST
 
@@ -64,8 +64,8 @@ START_TEST(test_requires_version_3)
         "  \"agents\": {}"
         "}";
 
-    nabtoshell_pattern_config* config =
-        nabtoshell_pattern_config_parse(json, strlen(json));
+    tmuxremote_pattern_config* config =
+        tmuxremote_pattern_config_parse(json, strlen(json));
     ck_assert_ptr_null(config);
 }
 END_TEST
@@ -87,17 +87,17 @@ START_TEST(test_invalid_rule_is_skipped)
         "  }"
         "}";
 
-    nabtoshell_pattern_config* config =
-        nabtoshell_pattern_config_parse(json, strlen(json));
+    tmuxremote_pattern_config* config =
+        tmuxremote_pattern_config_parse(json, strlen(json));
     ck_assert_ptr_nonnull(config);
 
-    const nabtoshell_agent_config* agent =
-        nabtoshell_pattern_config_find_agent(config, "a");
+    const tmuxremote_agent_config* agent =
+        tmuxremote_pattern_config_find_agent(config, "a");
     ck_assert_ptr_nonnull(agent);
     ck_assert_int_eq(agent->pattern_count, 1);
     ck_assert_str_eq(agent->patterns[0].id, "ok");
 
-    nabtoshell_pattern_config_free(config);
+    tmuxremote_pattern_config_free(config);
 }
 END_TEST
 

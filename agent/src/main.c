@@ -1,7 +1,7 @@
-#include "nabtoshell.h"
-#include "nabtoshell_init.h"
-#include "nabtoshell_banner.h"
-#include "nabtoshell_device.h"
+#include "tmuxremote.h"
+#include "tmuxremote_init.h"
+#include "tmuxremote_banner.h"
+#include "tmuxremote_device.h"
 
 #include <apps/common/device_config.h>
 #include <apps/common/logging.h>
@@ -86,12 +86,12 @@ static bool make_directory(const char* directory);
 static bool make_directories(const char* homeDir);
 static char* get_default_home_dir(void);
 static bool run_agent(const struct args* args);
-static bool load_pattern_configs(struct nabtoshell* app);
+static bool load_pattern_configs(struct tmuxremote* app);
 static void print_help(void);
 static int cmp_str_ptr(const void* a, const void* b);
-static bool merge_agent_into_config(nabtoshell_pattern_config* merged,
-                                    nabtoshell_agent_config* agent);
-static bool has_duplicate_pattern_ids(const nabtoshell_agent_config* agent);
+static bool merge_agent_into_config(tmuxremote_pattern_config* merged,
+                                    tmuxremote_agent_config* agent);
+static bool has_duplicate_pattern_ids(const tmuxremote_agent_config* agent);
 
 int main(int argc, char** argv)
 {
@@ -106,7 +106,7 @@ int main(int argc, char** argv)
     } else if (args.showHelp) {
         print_help();
     } else if (args.showVersion) {
-        printf("%s" NEWLINE, NABTOSHELL_VERSION);
+        printf("%s" NEWLINE, TMUXREMOTE_VERSION);
     } else if (args.init || args.demoInit) {
         char* homeDir = args.homeDir ? args.homeDir : get_default_home_dir();
         if (homeDir == NULL) {
@@ -118,7 +118,7 @@ int main(int argc, char** argv)
                 printf("--demo-init has been removed. Use --init (invite-only pairing)." NEWLINE);
                 status = false;
             } else {
-                status = nabtoshell_do_init(homeDir, args.productId, args.deviceId);
+                status = tmuxremote_do_init(homeDir, args.productId, args.deviceId);
             }
             if (homeDir != args.homeDir) {
                 free(homeDir);
@@ -130,7 +130,7 @@ int main(int argc, char** argv)
             printf("Cannot determine home directory" NEWLINE);
             status = false;
         } else {
-            status = nabtoshell_do_add_user(homeDir, args.addUser);
+            status = tmuxremote_do_add_user(homeDir, args.addUser);
             if (homeDir != args.homeDir) {
                 free(homeDir);
             }
@@ -141,7 +141,7 @@ int main(int argc, char** argv)
             printf("Cannot determine home directory" NEWLINE);
             status = false;
         } else {
-            status = nabtoshell_do_remove_user(homeDir, args.removeUser);
+            status = tmuxremote_do_remove_user(homeDir, args.removeUser);
             if (homeDir != args.homeDir) {
                 free(homeDir);
             }
@@ -170,8 +170,8 @@ int main(int argc, char** argv)
 
 bool run_agent(const struct args* args)
 {
-    struct nabtoshell app;
-    nabtoshell_init(&app);
+    struct tmuxremote app;
+    tmuxremote_init(&app);
 
     globalDevice = nabto_device_new();
     if (globalDevice == NULL) {
@@ -199,7 +199,7 @@ bool run_agent(const struct args* args)
 
     /* Load pattern detection configs before starting listeners/device. */
     if (!load_pattern_configs(&app)) {
-        nabtoshell_deinit(&app);
+        tmuxremote_deinit(&app);
         nabto_device_free(globalDevice);
         globalDevice = NULL;
         return false;
@@ -210,8 +210,8 @@ bool run_agent(const struct args* args)
     device_config_init(&deviceConfig);
     if (!load_device_config(&fsImpl, app.deviceConfigFile, &deviceConfig, &app.logger)) {
         printf("Device configuration not found (%s)." NEWLINE, app.deviceConfigFile);
-        printf("Run nabtoshell-agent --init to create initial configuration." NEWLINE);
-        nabtoshell_deinit(&app);
+        printf("Run tmux-remote-agent --init to create initial configuration." NEWLINE);
+        tmuxremote_deinit(&app);
         nabto_device_free(globalDevice);
         globalDevice = NULL;
         return false;
@@ -235,23 +235,23 @@ bool run_agent(const struct args* args)
     if (!load_or_create_private_key(app.device, &fsImpl, app.deviceKeyFile, &app.logger)) {
         printf("Could not load or create the private key" NEWLINE);
         device_config_deinit(&deviceConfig);
-        nabtoshell_deinit(&app);
+        tmuxremote_deinit(&app);
         nabto_device_free(globalDevice);
         globalDevice = NULL;
         return false;
     }
 
-    nabto_device_set_app_name(app.device, "NabtoShell");
-    nabto_device_set_app_version(app.device, NABTOSHELL_VERSION);
+    nabto_device_set_app_name(app.device, "tmux-remote");
+    nabto_device_set_app_version(app.device, TMUXREMOTE_VERSION);
     nabto_device_enable_mdns(app.device);
-    nabto_device_mdns_add_subtype(app.device, "nabtoshell");
+    nabto_device_mdns_add_subtype(app.device, "tmux-remote");
 
     /* Initialize IAM */
-    nabtoshell_iam_init(&app.iam, app.device, &fsImpl, app.iamStateFile, &app.logger);
-    if (!nabtoshell_iam_load_state(&app.iam)) {
+    tmuxremote_iam_init(&app.iam, app.device, &fsImpl, app.iamStateFile, &app.logger);
+    if (!tmuxremote_iam_load_state(&app.iam)) {
         printf("Failed to load IAM state" NEWLINE);
         device_config_deinit(&deviceConfig);
-        nabtoshell_deinit(&app);
+        tmuxremote_deinit(&app);
         nabto_device_free(globalDevice);
         globalDevice = NULL;
         return false;
@@ -266,7 +266,7 @@ bool run_agent(const struct args* args)
     if (ec != NABTO_DEVICE_EC_OK) {
         printf("Failed to start device: %s" NEWLINE, nabto_device_error_get_message(ec));
         device_config_deinit(&deviceConfig);
-        nabtoshell_deinit(&app);
+        tmuxremote_deinit(&app);
         nabto_device_free(globalDevice);
         globalDevice = NULL;
         return false;
@@ -275,21 +275,21 @@ bool run_agent(const struct args* args)
     app.startTime = time(NULL);
 
     /* Initialize CoAP handlers */
-    nabtoshell_coap_resize_init(&app.coapResize, app.device, &app);
-    nabtoshell_coap_sessions_init(&app.coapSessions, app.device, &app);
-    nabtoshell_coap_attach_init(&app.coapAttach, app.device, &app);
-    nabtoshell_coap_create_init(&app.coapCreate, app.device, &app);
-    nabtoshell_coap_status_init(&app.coapStatus, app.device, &app);
+    tmuxremote_coap_resize_init(&app.coapResize, app.device, &app);
+    tmuxremote_coap_sessions_init(&app.coapSessions, app.device, &app);
+    tmuxremote_coap_attach_init(&app.coapAttach, app.device, &app);
+    tmuxremote_coap_create_init(&app.coapCreate, app.device, &app);
+    tmuxremote_coap_status_init(&app.coapStatus, app.device, &app);
 
     /* Initialize stream listeners */
-    nabtoshell_stream_listener_init(&app.streamListener, app.device, &app);
-    nabtoshell_control_stream_listener_init(&app.controlStreamListener, app.device, &app);
+    tmuxremote_stream_listener_init(&app.streamListener, app.device, &app);
+    tmuxremote_control_stream_listener_init(&app.controlStreamListener, app.device, &app);
 
     /* Print banner */
     char* deviceFingerprint = NULL;
     nabto_device_get_device_fingerprint(app.device, &deviceFingerprint);
 
-    nabtoshell_print_banner(&app, deviceFingerprint);
+    tmuxremote_print_banner(&app, deviceFingerprint);
     nabto_device_string_free(deviceFingerprint);
 
     /* Device event listener and signal handling.
@@ -314,13 +314,13 @@ bool run_agent(const struct args* args)
 
     /* Shutdown */
     nabto_device_listener_stop(eventState.listener);
-    nabtoshell_coap_handler_stop(&app.coapResize);
-    nabtoshell_coap_handler_stop(&app.coapSessions);
-    nabtoshell_coap_handler_stop(&app.coapAttach);
-    nabtoshell_coap_handler_stop(&app.coapCreate);
-    nabtoshell_coap_handler_stop(&app.coapStatus);
-    nabtoshell_stream_listener_stop(&app.streamListener);
-    nabtoshell_control_stream_listener_stop(&app.controlStreamListener);
+    tmuxremote_coap_handler_stop(&app.coapResize);
+    tmuxremote_coap_handler_stop(&app.coapSessions);
+    tmuxremote_coap_handler_stop(&app.coapAttach);
+    tmuxremote_coap_handler_stop(&app.coapCreate);
+    tmuxremote_coap_handler_stop(&app.coapStatus);
+    tmuxremote_stream_listener_stop(&app.streamListener);
+    tmuxremote_control_stream_listener_stop(&app.controlStreamListener);
 
     struct device_close_state closeState;
     closeState.ec = NABTO_DEVICE_EC_OK;
@@ -341,22 +341,22 @@ bool run_agent(const struct args* args)
     nabto_device_future_free(eventState.future);
     nabto_device_listener_free(eventState.listener);
 
-    nabtoshell_coap_handler_deinit(&app.coapResize);
-    nabtoshell_coap_handler_deinit(&app.coapSessions);
-    nabtoshell_coap_handler_deinit(&app.coapAttach);
-    nabtoshell_coap_handler_deinit(&app.coapCreate);
-    nabtoshell_coap_handler_deinit(&app.coapStatus);
+    tmuxremote_coap_handler_deinit(&app.coapResize);
+    tmuxremote_coap_handler_deinit(&app.coapSessions);
+    tmuxremote_coap_handler_deinit(&app.coapAttach);
+    tmuxremote_coap_handler_deinit(&app.coapCreate);
+    tmuxremote_coap_handler_deinit(&app.coapStatus);
     /* Shutdown ordering: join the control monitor thread first (it calls
      * copy_active_prompt_for_ref which locks activeStreamsMutex), then join
      * PTY reader threads (they call send_prompt_*_for_ref which locks
      * streamListMutex), then destroy both listeners and their mutexes. */
-    nabtoshell_control_stream_listener_join_monitor(&app.controlStreamListener);
-    nabtoshell_stream_listener_deinit(&app.streamListener);
-    nabtoshell_control_stream_listener_deinit(&app.controlStreamListener);
+    tmuxremote_control_stream_listener_join_monitor(&app.controlStreamListener);
+    tmuxremote_stream_listener_deinit(&app.streamListener);
+    tmuxremote_control_stream_listener_deinit(&app.controlStreamListener);
 
     device_config_deinit(&deviceConfig);
-    nabtoshell_iam_deinit(&app.iam);
-    nabtoshell_deinit(&app);
+    tmuxremote_iam_deinit(&app.iam);
+    tmuxremote_deinit(&app);
     nabto_device_free(globalDevice);
     globalDevice = NULL;
 
@@ -542,14 +542,14 @@ char* get_default_home_dir(void)
         return NULL;
     }
     char buffer[512];
-    snprintf(buffer, sizeof(buffer), "%s/.nabtoshell", home);
+    snprintf(buffer, sizeof(buffer), "%s/.tmux-remote", home);
     return strdup(buffer);
 }
 
 /*
- * Load pattern config files from ~/.nabtoshell/patterns/ (all .json files).
+ * Load pattern config files from ~/.tmux-remote/patterns/ (all .json files).
  */
-bool load_pattern_configs(struct nabtoshell* app)
+bool load_pattern_configs(struct tmuxremote* app)
 {
     char dirPath[512];
     snprintf(dirPath, sizeof(dirPath), "%s/patterns", app->homeDir);
@@ -560,7 +560,7 @@ bool load_pattern_configs(struct nabtoshell* app)
     }
 
     if (app->patternConfig != NULL) {
-        nabtoshell_pattern_config_free(app->patternConfig);
+        tmuxremote_pattern_config_free(app->patternConfig);
         app->patternConfig = NULL;
     }
 
@@ -593,7 +593,7 @@ bool load_pattern_configs(struct nabtoshell* app)
 
     qsort(fileNames, fileCount, sizeof(char*), cmp_str_ptr);
 
-    nabtoshell_pattern_config* merged = calloc(1, sizeof(nabtoshell_pattern_config));
+    tmuxremote_pattern_config* merged = calloc(1, sizeof(tmuxremote_pattern_config));
     if (merged == NULL) {
         for (size_t i = 0; i < fileCount; i++) {
             free(fileNames[i]);
@@ -645,7 +645,7 @@ bool load_pattern_configs(struct nabtoshell* app)
         }
         json[readLen] = '\0';
 
-        nabtoshell_pattern_config* cfg = nabtoshell_pattern_config_parse(json, readLen);
+        tmuxremote_pattern_config* cfg = tmuxremote_pattern_config_parse(json, readLen);
         free(json);
 
         if (cfg == NULL) {
@@ -660,13 +660,13 @@ bool load_pattern_configs(struct nabtoshell* app)
         } else if (cfg->version != merged->version) {
             printf("Error: pattern config version mismatch in %s (expected %d, got %d)" NEWLINE,
                    filePath, merged->version, cfg->version);
-            nabtoshell_pattern_config_free(cfg);
+            tmuxremote_pattern_config_free(cfg);
             ok = false;
             break;
         }
 
         for (int ai = 0; ai < cfg->agent_count; ai++) {
-            nabtoshell_agent_config* agent = &cfg->agents[ai];
+            tmuxremote_agent_config* agent = &cfg->agents[ai];
 
             if (has_duplicate_pattern_ids(agent)) {
                 printf("Error: duplicate pattern ids for agent '%s' in %s" NEWLINE,
@@ -683,7 +683,7 @@ bool load_pattern_configs(struct nabtoshell* app)
             }
         }
 
-        nabtoshell_pattern_config_free(cfg);
+        tmuxremote_pattern_config_free(cfg);
         if (!ok) {
             break;
         }
@@ -695,7 +695,7 @@ bool load_pattern_configs(struct nabtoshell* app)
     free(fileNames);
 
     if (!ok) {
-        nabtoshell_pattern_config_free(merged);
+        tmuxremote_pattern_config_free(merged);
         return false;
     }
 
@@ -704,7 +704,7 @@ bool load_pattern_configs(struct nabtoshell* app)
         printf("Pattern config loaded (%d agents), activates per-session" NEWLINE,
                merged->agent_count);
     } else {
-        nabtoshell_pattern_config_free(merged);
+        tmuxremote_pattern_config_free(merged);
         printf("Error: no valid agents loaded from pattern config files" NEWLINE);
         return false;
     }
@@ -719,8 +719,8 @@ static int cmp_str_ptr(const void* a, const void* b)
     return strcmp(*sa, *sb);
 }
 
-static bool merge_agent_into_config(nabtoshell_pattern_config* merged,
-                                    nabtoshell_agent_config* agent)
+static bool merge_agent_into_config(tmuxremote_pattern_config* merged,
+                                    tmuxremote_agent_config* agent)
 {
     if (merged == NULL || agent == NULL || agent->id == NULL) {
         return false;
@@ -733,8 +733,8 @@ static bool merge_agent_into_config(nabtoshell_pattern_config* merged,
         }
     }
 
-    nabtoshell_agent_config* newAgents = realloc(
-        merged->agents, sizeof(nabtoshell_agent_config) * (merged->agent_count + 1));
+    tmuxremote_agent_config* newAgents = realloc(
+        merged->agents, sizeof(tmuxremote_agent_config) * (merged->agent_count + 1));
     if (newAgents == NULL) {
         return false;
     }
@@ -746,7 +746,7 @@ static bool merge_agent_into_config(nabtoshell_pattern_config* merged,
     return true;
 }
 
-static bool has_duplicate_pattern_ids(const nabtoshell_agent_config* agent)
+static bool has_duplicate_pattern_ids(const tmuxremote_agent_config* agent)
 {
     if (agent == NULL) {
         return true;
@@ -768,14 +768,14 @@ static bool has_duplicate_pattern_ids(const nabtoshell_agent_config* agent)
 
 void print_help(void)
 {
-    printf("NabtoShell Agent v%s" NEWLINE, NABTOSHELL_VERSION);
+    printf("tmux-remote agent v%s" NEWLINE, TMUXREMOTE_VERSION);
     printf(NEWLINE);
-    printf("Usage: nabtoshell-agent [options]" NEWLINE);
+    printf("Usage: tmux-remote-agent [options]" NEWLINE);
     printf(NEWLINE);
     printf("Options:" NEWLINE);
     printf("  -h, --help                Show this help" NEWLINE);
     printf("  -v, --version             Show version" NEWLINE);
-    printf("  -H, --home-dir <dir>      Home directory (default: ~/.nabtoshell/)" NEWLINE);
+    printf("  -H, --home-dir <dir>      Home directory (default: ~/.tmux-remote/)" NEWLINE);
     printf("      --init                Initialize configuration" NEWLINE);
     printf("      --demo-init           Removed (invite-only pairing enforced)" NEWLINE);
     printf("      --add-user <name>     Create a pairing invitation for a new user" NEWLINE);

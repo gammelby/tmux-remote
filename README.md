@@ -1,4 +1,4 @@
-# NabtoShell
+# tmux-remote
 
 Secure remote terminal access over Nabto Edge P2P connectivity. Exposes tmux sessions on a machine to authenticated clients without SSH, port forwarding, or firewall configuration.
 
@@ -25,7 +25,7 @@ The Nabto Embedded SDK is fetched automatically via CMake FetchContent.
 
 ```bash
 make agent
-# Binary: agent/_build/nabtoshell-agent
+# Binary: agent/_build/tmux-remote-agent
 ```
 
 ### CLI client
@@ -34,17 +34,17 @@ The Nabto Client SDK is fetched automatically via CMake FetchContent (downloaded
 
 ```bash
 make client
-# Binary: clients/cli/_build/nabtoshell
+# Binary: clients/cli/_build/tmux-remote
 ```
 
 ## Usage
 
 ### Overview
 
-NabtoShell has two components:
+tmux-remote has two components:
 
-- **Agent** (`nabtoshell-agent`): runs on the machine you want to access remotely. Serves tmux sessions over Nabto.
-- **CLI client** (`nabtoshell`): runs on the machine you are working from. Connects to a remote agent and opens an interactive terminal.
+- **Agent** (`tmux-remote-agent`): runs on the machine you want to access remotely. Serves tmux sessions over Nabto.
+- **CLI client** (`tmux-remote`): runs on the machine you are working from. Connects to a remote agent and opens an interactive terminal.
 
 The typical workflow is: initialize the agent, pair a client, then attach to a session.
 
@@ -53,10 +53,10 @@ The typical workflow is: initialize the agent, pair a client, then attach to a s
 On the machine you want to access remotely, create a device identity in the [Nabto Cloud Console](https://console.cloud.nabto.com/) and initialize the agent:
 
 ```bash
-nabtoshell-agent --init -p pr-xxxxxxxx -d de-yyyyyyyy
+tmux-remote-agent --init -p pr-xxxxxxxx -d de-yyyyyyyy
 ```
 
-This creates the configuration in `~/.nabtoshell/` and prints:
+This creates the configuration in `~/.tmux-remote/` and prints:
 
 ```
 Device fingerprint: a1b2c3d4e5f6...
@@ -72,7 +72,7 @@ The pairing string is a one-time credential. After a client uses it, it is inval
 ### Step 2: Start the agent
 
 ```bash
-nabtoshell-agent
+tmux-remote-agent
 ```
 
 The agent attaches to the Nabto basestation and waits for connections. It prints a banner showing paired users and available tmux sessions.
@@ -88,7 +88,7 @@ tmux new-session -d -s main
 On the machine you will connect from, run the pair command with the pairing string from Step 1:
 
 ```bash
-nabtoshell pair p=pr-xxxxxxxx,d=de-yyyyyyyy,u=owner,pwd=CbAHaqpKKrhK,sct=TUfe3n3hhhM9 \
+tmux-remote pair p=pr-xxxxxxxx,d=de-yyyyyyyy,u=owner,pwd=CbAHaqpKKrhK,sct=TUfe3n3hhhM9 \
   --name my-server
 ```
 
@@ -99,7 +99,7 @@ Pairing is a one-time operation. All future connections authenticate with the ex
 ### Step 4: Attach to a session
 
 ```bash
-nabtoshell attach my-server
+tmux-remote attach my-server
 ```
 
 This opens an interactive terminal attached to the default tmux session ("main") on the remote machine. The session behaves like SSH: keystrokes are sent to the remote PTY, and output is displayed locally. Terminal resize events are forwarded automatically.
@@ -109,7 +109,7 @@ Press `Ctrl-C` or type `exit` to disconnect.
 ### Listing sessions
 
 ```bash
-nabtoshell sessions my-server
+tmux-remote sessions my-server
 ```
 
 Output:
@@ -125,7 +125,7 @@ Sessions on 'my-server':
 ### Attaching to a specific session
 
 ```bash
-nabtoshell attach my-server dev
+tmux-remote attach my-server dev
 ```
 
 If the session does not exist, the command fails with an error.
@@ -133,7 +133,7 @@ If the session does not exist, the command fails with an error.
 ### Creating a new session
 
 ```bash
-nabtoshell create my-server work
+tmux-remote create my-server work
 ```
 
 This creates a tmux session named "work" on the remote machine and attaches to it. If the session name is omitted, a name is auto-generated.
@@ -141,25 +141,25 @@ This creates a tmux session named "work" on the remote machine and attaches to i
 To run a specific command instead of the default shell:
 
 ```bash
-nabtoshell create my-server claude --command "claude --resume"
+tmux-remote create my-server claude --command "claude --resume"
 ```
 
-Short aliases: `nabtoshell n`, `nabtoshell new`, `nabtoshell c`.
+Short aliases: `tmux-remote n`, `tmux-remote new`, `tmux-remote c`.
 
 ### Listing paired devices
 
 ```bash
-nabtoshell devices
+tmux-remote devices
 ```
 
 Shows all saved device bookmarks with their names, product IDs, and device IDs.
 
 ### Client home directory
 
-Client state (private key and device bookmarks) is stored in `~/.nabtoshell-client/`. Override this with the `NABTOSHELL_HOME` environment variable:
+Client state (private key and device bookmarks) is stored in `~/.tmux-remote-client/`. Override this with the `TMUX_REMOTE_HOME` environment variable:
 
 ```bash
-NABTOSHELL_HOME=/tmp/alt-client nabtoshell devices
+TMUX_REMOTE_HOME=/tmp/alt-client tmux-remote devices
 ```
 
 ### Adding more clients
@@ -167,19 +167,19 @@ NABTOSHELL_HOME=/tmp/alt-client nabtoshell devices
 Each pairing invitation is single-use. To pair a second device (phone, laptop, etc.), create a new invitation on the agent machine:
 
 ```bash
-nabtoshell-agent --add-user tablet
+tmux-remote-agent --add-user tablet
 ```
 
 This prints a new pairing string. Use it to pair the second client:
 
 ```bash
-nabtoshell pair <new-pairing-string> --name my-server
+tmux-remote pair <new-pairing-string> --name my-server
 ```
 
 ### Revoking access
 
 ```bash
-nabtoshell-agent --remove-user tablet
+tmux-remote-agent --remove-user tablet
 ```
 
 The revoked client can no longer connect.
@@ -215,12 +215,12 @@ No extra device IDs, agent instances, or configuration are needed for multiple s
 ## Agent Reference
 
 ```
-nabtoshell-agent [options]
+tmux-remote-agent [options]
 
 Options:
   -h, --help                Show help
   -v, --version             Show version
-  -H, --home-dir <dir>      Home directory (default: ~/.nabtoshell/)
+  -H, --home-dir <dir>      Home directory (default: ~/.tmux-remote/)
       --log-level <level>   Log level: error, info, trace, debug (default: error)
       --random-ports        Use random ports instead of defaults
       --init                Initialize configuration
@@ -234,7 +234,7 @@ Options:
 ## CLI Client Reference
 
 ```
-nabtoshell <command> [options]
+tmux-remote <command> [options]
 
 Commands:
   pair <pairing-string>           One-time pairing with a device
@@ -258,7 +258,7 @@ Commands:
 
 ## Security Model
 
-NabtoShell grants remote shell access. The security model reflects this: a compromise means arbitrary command execution.
+tmux-remote grants remote shell access. The security model reflects this: a compromise means arbitrary command execution.
 
 - **Single role**: Owner. Full access or no access. There are no "limited" or "read-only" roles.
 - **Password-invite pairing only**: Each pairing invitation is single-use. After a client pairs, the password is invalidated and pairing is closed. No open pairing modes in normal operation.

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(NabtoShellAgent C)
+project(TmuxRemoteAgent C)
 
 include(FetchContent)
 
@@ -22,44 +22,44 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(PCRE2 REQUIRED IMPORTED_TARGET libpcre2-8)
 
 set(prompt_src
-  src/nabtoshell_prompt.c
-  src/nabtoshell_pattern_config.c
-  src/nabtoshell_terminal_state.c
-  src/nabtoshell_prompt_rules.c
-  src/nabtoshell_prompt_lifecycle.c
-  src/nabtoshell_prompt_detector.c
-  src/nabtoshell_prompt_protocol.c
+  src/tmuxremote_prompt.c
+  src/tmuxremote_pattern_config.c
+  src/tmuxremote_terminal_state.c
+  src/tmuxremote_prompt_rules.c
+  src/tmuxremote_prompt_lifecycle.c
+  src/tmuxremote_prompt_detector.c
+  src/tmuxremote_prompt_protocol.c
 )
 
 set(src
   ${ne_iam_src}
   src/main.c
-  src/nabtoshell_device.c
-  src/nabtoshell_iam.c
-  src/nabtoshell_init.c
-  src/nabtoshell_coap_handler.c
-  src/nabtoshell_coap_resize.c
-  src/nabtoshell_coap_sessions.c
-  src/nabtoshell_coap_attach.c
-  src/nabtoshell_coap_create.c
-  src/nabtoshell_coap_status.c
-  src/nabtoshell_control_stream.c
-  src/nabtoshell_stream.c
-  src/nabtoshell_session.c
-  src/nabtoshell_tmux.c
-  src/nabtoshell_banner.c
+  src/tmuxremote_device.c
+  src/tmuxremote_iam.c
+  src/tmuxremote_init.c
+  src/tmuxremote_coap_handler.c
+  src/tmuxremote_coap_resize.c
+  src/tmuxremote_coap_sessions.c
+  src/tmuxremote_coap_attach.c
+  src/tmuxremote_coap_create.c
+  src/tmuxremote_coap_status.c
+  src/tmuxremote_control_stream.c
+  src/tmuxremote_stream.c
+  src/tmuxremote_session.c
+  src/tmuxremote_tmux.c
+  src/tmuxremote_banner.c
   ${prompt_src}
 )
 
-add_executable(nabtoshell-agent ${src})
+add_executable(tmux-remote-agent ${src})
 
-target_include_directories(nabtoshell-agent PRIVATE
+target_include_directories(tmux-remote-agent PRIVATE
   ${NABTO_SDK_SRC}/src
   ${NABTO_SDK_SRC}/include
   ${NABTO_SDK_SRC}
 )
 
-target_link_libraries(nabtoshell-agent
+target_link_libraries(tmux-remote-agent
   nabto_device
   3rdparty_gopt
   cjson
@@ -72,42 +72,42 @@ target_link_libraries(nabtoshell-agent
 )
 
 if(NOT APPLE)
-  target_link_libraries(nabtoshell-agent util)
+  target_link_libraries(tmux-remote-agent util)
 endif()
 
-install(TARGETS nabtoshell-agent RUNTIME DESTINATION bin)
+install(TARGETS tmux-remote-agent RUNTIME DESTINATION bin)
 
 pkg_check_modules(CHECK IMPORTED_TARGET check)
 if(CHECK_FOUND)
   enable_testing()
 
-  add_library(nabtoshell_prompt STATIC ${prompt_src})
-  target_include_directories(nabtoshell_prompt PUBLIC src)
-  target_link_libraries(nabtoshell_prompt PUBLIC
+  add_library(tmuxremote_prompt STATIC ${prompt_src})
+  target_include_directories(tmuxremote_prompt PUBLIC src)
+  target_link_libraries(tmuxremote_prompt PUBLIC
     cjson PkgConfig::PCRE2 TinyCBOR::tinycbor Threads::Threads)
 
   add_executable(test_prompt_config tests/test_prompt_config.c)
-  target_link_libraries(test_prompt_config nabtoshell_prompt PkgConfig::CHECK)
+  target_link_libraries(test_prompt_config tmuxremote_prompt PkgConfig::CHECK)
   add_test(NAME prompt_config COMMAND test_prompt_config)
 
   add_executable(test_terminal_state tests/test_terminal_state.c)
-  target_link_libraries(test_terminal_state nabtoshell_prompt PkgConfig::CHECK)
+  target_link_libraries(test_terminal_state tmuxremote_prompt PkgConfig::CHECK)
   add_test(NAME terminal_state COMMAND test_terminal_state)
 
   add_executable(test_prompt_rules tests/test_prompt_rules.c)
-  target_link_libraries(test_prompt_rules nabtoshell_prompt PkgConfig::CHECK)
+  target_link_libraries(test_prompt_rules tmuxremote_prompt PkgConfig::CHECK)
   add_test(NAME prompt_rules COMMAND test_prompt_rules)
 
   add_executable(test_prompt_lifecycle tests/test_prompt_lifecycle.c)
-  target_link_libraries(test_prompt_lifecycle nabtoshell_prompt PkgConfig::CHECK)
+  target_link_libraries(test_prompt_lifecycle tmuxremote_prompt PkgConfig::CHECK)
   add_test(NAME prompt_lifecycle COMMAND test_prompt_lifecycle)
 
   add_executable(test_prompt_protocol tests/test_prompt_protocol.c)
-  target_link_libraries(test_prompt_protocol nabtoshell_prompt PkgConfig::CHECK)
+  target_link_libraries(test_prompt_protocol tmuxremote_prompt PkgConfig::CHECK)
   add_test(NAME prompt_protocol COMMAND test_prompt_protocol)
 
   add_executable(test_prompt_detector_replay tests/test_prompt_detector_replay.c)
-  target_link_libraries(test_prompt_detector_replay nabtoshell_prompt PkgConfig::CHECK)
+  target_link_libraries(test_prompt_detector_replay tmuxremote_prompt PkgConfig::CHECK)
   target_compile_definitions(test_prompt_detector_replay PRIVATE
     TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
   add_test(NAME prompt_detector_replay COMMAND test_prompt_detector_replay)

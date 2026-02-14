@@ -30,7 +30,7 @@ def test_attach_interactive(paired_env, cli_binary):
 
     time.sleep(3)
 
-    os.write(master_fd, b"echo nabtoshell_test_marker\n")
+    os.write(master_fd, b"echo tmuxremote_test_marker\n")
     time.sleep(2)
 
     output = b""
@@ -57,5 +57,5 @@ def test_attach_interactive(paired_env, cli_binary):
     os.close(master_fd)
     os.close(slave_fd)
 
-    assert "nabtoshell_test_marker" in output_str, \
+    assert "tmuxremote_test_marker" in output_str, \
         f"Expected marker not found in output: {output_str}"

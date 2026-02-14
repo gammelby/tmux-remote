@@ -1,6 +1,7 @@
 platform :ios, '17.0'
+project 'TmuxRemote.xcodeproj'
 
-target 'NabtoShell' do
+target 'TmuxRemote' do
   use_frameworks!
 
   pod 'NabtoEdgeClientSwift', '~> 3.0'
@@ -8,11 +9,11 @@ target 'NabtoShell' do
   # SwiftTerm is added via SPM in project.yml (no CocoaPods podspec available)
   # NabtoEdgeIamUtil omitted: pairing is implemented directly via CoAP (2 endpoints)
 
-  target 'NabtoShellTests' do
+  target 'TmuxRemoteTests' do
     inherit! :search_paths
   end
 
-  # NabtoShellUITests removed: UI tests drive the app via XCUIApplication
+  # TmuxRemoteUITests removed: UI tests drive the app via XCUIApplication
   # and need zero framework access
 end
 
