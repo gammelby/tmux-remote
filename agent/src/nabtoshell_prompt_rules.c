@@ -327,6 +327,30 @@ static char* dup_capture(const char* subject,
     return out;
 }
 
+static const char* find_numbered_option_start(const char* line)
+{
+    if (line == NULL) {
+        return NULL;
+    }
+
+    for (const unsigned char* p = (const unsigned char*)line; *p != '\0'; p++) {
+        if (!isdigit(*p)) {
+            continue;
+        }
+
+        const unsigned char* q = p;
+        while (isdigit(*q)) {
+            q++;
+        }
+
+        if (*q == '.' && isspace((unsigned char)q[1])) {
+            return (const char*)p;
+        }
+    }
+
+    return NULL;
+}
+
 static bool extract_numbered_menu_actions(const nabtoshell_compiled_prompt_rule* rule,
                                           const nabtoshell_terminal_snapshot* snapshot,
                                           int prompt_row,
@@ -361,28 +385,60 @@ static bool extract_numbered_menu_actions(const nabtoshell_compiled_prompt_rule*
         return false;
     }
 
+    bool seen_numbers[NABTOSHELL_PROMPT_MAX_ACTIONS + 1];
+    memset(seen_numbers, 0, sizeof(seen_numbers));
+
     for (int row = prompt_row + 1; row <= max_row; row++) {
         const char* line = snapshot->lines[row];
         if (line == NULL || line[0] == '\0') {
             continue;
         }
 
+        const char* matched_subject = line;
         int rc = pcre2_match(option_regex,
-                             (PCRE2_SPTR)line,
-                             strlen(line),
+                             (PCRE2_SPTR)matched_subject,
+                             strlen(matched_subject),
                              0,
                              0,
                              match,
                              NULL);
         if (rc < 3) {
+            const char* option_start = find_numbered_option_start(line);
+            if (option_start != NULL && option_start != line) {
+                matched_subject = option_start;
+                rc = pcre2_match(option_regex,
+                                 (PCRE2_SPTR)matched_subject,
+                                 strlen(matched_subject),
+                                 0,
+                                 0,
+                                 match,
+                                 NULL);
+            }
+        }
+        if (rc < 3) {
             continue;
         }
 
         PCRE2_SIZE* ovector = pcre2_get_ovector_pointer(match);
-        char* number = dup_capture(line, ovector, 1);
-        char* label = dup_capture(line, ovector, 2);
+        char* number = dup_capture(matched_subject, ovector, 1);
+        char* label = dup_capture(matched_subject, ovector, 2);
 
         if (number == NULL || label == NULL) {
+            free(number);
+            free(label);
+            continue;
+        }
+
+        char* end = NULL;
+        long option_number = strtol(number, &end, 10);
+        if (end == number ||
+            option_number <= 0 ||
+            option_number > NABTOSHELL_PROMPT_MAX_ACTIONS) {
+            free(number);
+            free(label);
+            continue;
+        }
+        if (seen_numbers[option_number]) {
             free(number);
             free(label);
             continue;
@@ -396,6 +452,9 @@ static bool extract_numbered_menu_actions(const nabtoshell_compiled_prompt_rule*
         }
 
         bool ok = append_action(candidate, label, keys);
+        if (ok) {
+            seen_numbers[option_number] = true;
+        }
         free(number);
         free(label);
         free(keys);
@@ -410,7 +469,17 @@ static bool extract_numbered_menu_actions(const nabtoshell_compiled_prompt_rule*
         pcre2_code_free(fallback_regex);
     }
 
-    return candidate->action_count > 0;
+    if (candidate->action_count < 2 || !seen_numbers[1]) {
+        return false;
+    }
+
+    for (int n = 1; n <= candidate->action_count; n++) {
+        if (!seen_numbers[n]) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 static bool fill_candidate_from_rule(const nabtoshell_compiled_prompt_rule* rule,

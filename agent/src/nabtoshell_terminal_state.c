@@ -74,6 +74,49 @@ static int clamp_int(int value, int minimum, int maximum)
     return value;
 }
 
+void nabtoshell_terminal_state_resize(nabtoshell_terminal_state* state,
+                                      int rows,
+                                      int cols)
+{
+    if (state == NULL) {
+        return;
+    }
+
+    int new_rows = rows > 0 ? rows : TERMINAL_DEFAULT_ROWS;
+    int new_cols = cols > 0 ? cols : TERMINAL_DEFAULT_COLS;
+
+    if (new_rows == state->rows && new_cols == state->cols) {
+        return;
+    }
+
+    size_t new_count = (size_t)new_rows * (size_t)new_cols;
+    char* new_cells = malloc(new_count);
+    if (new_cells == NULL) {
+        return;
+    }
+    memset(new_cells, ' ', new_count);
+
+    if (state->cells != NULL) {
+        int copy_rows = state->rows < new_rows ? state->rows : new_rows;
+        int copy_cols = state->cols < new_cols ? state->cols : new_cols;
+        for (int row = 0; row < copy_rows; row++) {
+            memcpy(new_cells + (size_t)row * (size_t)new_cols,
+                   state->cells + (size_t)row * (size_t)state->cols,
+                   (size_t)copy_cols);
+        }
+        free(state->cells);
+    }
+
+    state->cells = new_cells;
+    state->rows = new_rows;
+    state->cols = new_cols;
+    state->cursor_row = clamp_int(state->cursor_row, 0, state->rows - 1);
+    state->cursor_col = clamp_int(state->cursor_col, 0, state->cols - 1);
+    state->saved_row = clamp_int(state->saved_row, 0, state->rows - 1);
+    state->saved_col = clamp_int(state->saved_col, 0, state->cols - 1);
+    state->sequence++;
+}
+
 static void clear_screen(nabtoshell_terminal_state* state)
 {
     if (state->cells == NULL) {
@@ -302,6 +345,18 @@ static void process_csi(nabtoshell_terminal_state* state,
             }
             break;
         }
+        case 'X': {
+            int n = get_param(params, 0, 1);
+            if (n <= 0) {
+                n = 1;
+            }
+            int end_col = state->cursor_col + n - 1;
+            clear_line_range(state,
+                             state->cursor_row,
+                             state->cursor_col,
+                             clamp_int(end_col, 0, state->cols - 1));
+            break;
+        }
         case 's': {
             state->saved_row = state->cursor_row;
             state->saved_col = state->cursor_col;
@@ -351,6 +406,11 @@ void nabtoshell_terminal_state_feed(nabtoshell_terminal_state* state,
     for (size_t i = 0; i < len; i++) {
         unsigned char ch = data[i];
 
+        if (state->in_escape_charset) {
+            state->in_escape_charset = false;
+            continue;
+        }
+
         if (state->in_csi) {
             if (ch >= 0x40 && ch <= 0x7E) {
                 state->csi_buf[state->csi_len] = '\0';
@@ -371,6 +431,12 @@ void nabtoshell_terminal_state_feed(nabtoshell_terminal_state* state,
             if (ch == '[') {
                 state->in_csi = true;
                 state->csi_len = 0;
+                continue;
+            }
+            if (ch == '(' || ch == ')' || ch == '*' || ch == '+' ||
+                ch == '-' || ch == '.' || ch == '/') {
+                /* Charset designation (e.g. ESC ( B) consumes one more byte. */
+                state->in_escape_charset = true;
                 continue;
             }
             continue;

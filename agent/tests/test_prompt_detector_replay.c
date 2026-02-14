@@ -13,6 +13,10 @@
 #endif
 
 #define RECORDING_PATH TEST_FIXTURES_DIR "/pty-log-2.ptyr"
+#define RECORDING_PATH_STICKY TEST_FIXTURES_DIR "/pty-log-7.ptyr"
+#define RECORDING_PATH_STICKY_2 TEST_FIXTURES_DIR "/pty-log-8.ptyr"
+#define RECORDING_PATH_STICKY_3 TEST_FIXTURES_DIR "/pty-log-9.ptyr"
+#define RECORDING_PATH_STICKY_4 TEST_FIXTURES_DIR "/pty-log-10.ptyr"
 #define CONFIG_PATH TEST_FIXTURES_DIR "/patterns.json"
 
 typedef struct {
@@ -22,6 +26,10 @@ typedef struct {
 
 typedef struct {
     nabtoshell_prompt_event_type type;
+    nabtoshell_prompt_type pattern_type;
+    int action_count;
+    bool has_primary_option;
+    bool has_charset_artifact;
     char id[NABTOSHELL_PROMPT_INSTANCE_ID_MAX];
 } replay_event;
 
@@ -39,6 +47,7 @@ static void on_event(nabtoshell_prompt_event_type type,
     }
 
     replay_event* ev = &events[event_count++];
+    memset(ev, 0, sizeof(*ev));
     ev->type = type;
     const char* id = (instance != NULL) ? instance->instance_id : instance_id;
     if (id != NULL) {
@@ -46,6 +55,21 @@ static void on_event(nabtoshell_prompt_event_type type,
         ev->id[sizeof(ev->id) - 1] = '\0';
     } else {
         ev->id[0] = '\0';
+    }
+
+    if (instance != NULL) {
+        ev->pattern_type = instance->pattern_type;
+        ev->action_count = instance->action_count;
+        for (int i = 0; i < instance->action_count; i++) {
+            const char* keys = instance->actions[i].keys;
+            const char* label = instance->actions[i].label;
+            if (keys != NULL && strcmp(keys, "1") == 0) {
+                ev->has_primary_option = true;
+            }
+            if (label != NULL && strstr(label, "/B") != NULL) {
+                ev->has_charset_artifact = true;
+            }
+        }
     }
 }
 
@@ -136,6 +160,44 @@ static int count_event_type(nabtoshell_prompt_event_type type)
     return count;
 }
 
+static void assert_no_present_gone_present_oscillation(void)
+{
+    for (int i = 0; i + 2 < event_count; i++) {
+        bool oscillation =
+            events[i].type == NABTOSHELL_PROMPT_EVENT_PRESENT &&
+            events[i + 1].type == NABTOSHELL_PROMPT_EVENT_GONE &&
+            events[i + 2].type == NABTOSHELL_PROMPT_EVENT_PRESENT &&
+            strcmp(events[i].id, events[i + 2].id) == 0;
+        ck_assert_msg(!oscillation,
+                      "unexpected oscillation for instance %s",
+                      events[i].id);
+    }
+}
+
+static void assert_numbered_menu_events_are_complete(void)
+{
+    for (int i = 0; i < event_count; i++) {
+        replay_event* ev = &events[i];
+        bool is_prompt_event = (ev->type == NABTOSHELL_PROMPT_EVENT_PRESENT ||
+                                ev->type == NABTOSHELL_PROMPT_EVENT_UPDATE);
+        if (!is_prompt_event ||
+            ev->pattern_type != NABTOSHELL_PROMPT_TYPE_NUMBERED_MENU) {
+            continue;
+        }
+
+        ck_assert_msg(ev->action_count >= 3,
+                      "numbered menu event had only %d actions (id=%s)",
+                      ev->action_count,
+                      ev->id);
+        ck_assert_msg(ev->has_primary_option,
+                      "numbered menu event missing option 1 (id=%s)",
+                      ev->id);
+        ck_assert_msg(!ev->has_charset_artifact,
+                      "numbered menu label contained '/B' artifact (id=%s)",
+                      ev->id);
+    }
+}
+
 static void replay_frames(const ptyr_frame* frames,
                           int frame_count,
                           bool split_frames,
@@ -179,17 +241,49 @@ START_TEST(test_replay_detects_prompts)
     replay_frames(frames, frame_count, false, &active);
 
     ck_assert_int_gt(count_event_type(NABTOSHELL_PROMPT_EVENT_PRESENT), 0);
+    assert_no_present_gone_present_oscillation();
 
-    for (int i = 0; i + 2 < event_count; i++) {
-        bool oscillation =
-            events[i].type == NABTOSHELL_PROMPT_EVENT_PRESENT &&
-            events[i + 1].type == NABTOSHELL_PROMPT_EVENT_GONE &&
-            events[i + 2].type == NABTOSHELL_PROMPT_EVENT_PRESENT &&
-            strcmp(events[i].id, events[i + 2].id) == 0;
-        ck_assert_msg(!oscillation,
-                      "unexpected oscillation for instance %s",
-                      events[i].id);
+    if (active != NULL) {
+        nabtoshell_prompt_instance_free(active);
+        free(active);
     }
+
+    free_frames(frames, frame_count);
+}
+END_TEST
+
+START_TEST(test_replay_sticky_prompt_remains_active)
+{
+    int frame_count = 0;
+    ptyr_frame* frames = load_recording(RECORDING_PATH_STICKY, &frame_count);
+
+    nabtoshell_prompt_instance* active = NULL;
+    replay_frames(frames, frame_count, false, &active);
+
+    ck_assert_int_gt(count_event_type(NABTOSHELL_PROMPT_EVENT_PRESENT), 0);
+    assert_no_present_gone_present_oscillation();
+    ck_assert_ptr_nonnull(active);
+
+    if (active != NULL) {
+        nabtoshell_prompt_instance_free(active);
+        free(active);
+    }
+
+    free_frames(frames, frame_count);
+}
+END_TEST
+
+START_TEST(test_replay_sticky_prompt_remains_active_2)
+{
+    int frame_count = 0;
+    ptyr_frame* frames = load_recording(RECORDING_PATH_STICKY_2, &frame_count);
+
+    nabtoshell_prompt_instance* active = NULL;
+    replay_frames(frames, frame_count, false, &active);
+
+    ck_assert_int_gt(count_event_type(NABTOSHELL_PROMPT_EVENT_PRESENT), 0);
+    assert_no_present_gone_present_oscillation();
+    ck_assert_ptr_nonnull(active);
 
     if (active != NULL) {
         nabtoshell_prompt_instance_free(active);
@@ -230,12 +324,60 @@ START_TEST(test_chunk_split_keeps_terminal_result)
 }
 END_TEST
 
+START_TEST(test_replay_sticky_prompt_remains_complete_3)
+{
+    int frame_count = 0;
+    ptyr_frame* frames = load_recording(RECORDING_PATH_STICKY_3, &frame_count);
+
+    nabtoshell_prompt_instance* active = NULL;
+    replay_frames(frames, frame_count, false, &active);
+
+    ck_assert_int_gt(count_event_type(NABTOSHELL_PROMPT_EVENT_PRESENT), 0);
+    assert_no_present_gone_present_oscillation();
+    assert_numbered_menu_events_are_complete();
+    ck_assert_ptr_nonnull(active);
+    ck_assert_int_ge(active->action_count, 3);
+
+    if (active != NULL) {
+        nabtoshell_prompt_instance_free(active);
+        free(active);
+    }
+
+    free_frames(frames, frame_count);
+}
+END_TEST
+
+START_TEST(test_replay_sticky_prompt_remains_complete_4)
+{
+    int frame_count = 0;
+    ptyr_frame* frames = load_recording(RECORDING_PATH_STICKY_4, &frame_count);
+
+    nabtoshell_prompt_instance* active = NULL;
+    replay_frames(frames, frame_count, false, &active);
+
+    ck_assert_int_gt(count_event_type(NABTOSHELL_PROMPT_EVENT_PRESENT), 0);
+    assert_no_present_gone_present_oscillation();
+    assert_numbered_menu_events_are_complete();
+
+    if (active != NULL) {
+        nabtoshell_prompt_instance_free(active);
+        free(active);
+    }
+
+    free_frames(frames, frame_count);
+}
+END_TEST
+
 Suite* replay_suite(void)
 {
     Suite* s = suite_create("PromptDetectorReplay");
     TCase* tc = tcase_create("Core");
 
     tcase_add_test(tc, test_replay_detects_prompts);
+    tcase_add_test(tc, test_replay_sticky_prompt_remains_active);
+    tcase_add_test(tc, test_replay_sticky_prompt_remains_active_2);
+    tcase_add_test(tc, test_replay_sticky_prompt_remains_complete_3);
+    tcase_add_test(tc, test_replay_sticky_prompt_remains_complete_4);
     tcase_add_test(tc, test_chunk_split_keeps_terminal_result);
 
     suite_add_tcase(s, tc);
