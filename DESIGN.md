@@ -28,14 +28,18 @@ The agent is tool-agnostic. It knows nothing about what runs inside the terminal
 
 ### Nabto Streams
 
-| Port | Name | Framing | Purpose |
-|------|------|---------|---------|
-| 1 | Data stream | None (raw bytes) | Bidirectional PTY relay, identical to SSH |
-| 2 | Control stream | Length-prefixed CBOR | Session state, prompt lifecycle events, client resolve |
+| Port | Name | Transport | Payload | Purpose |
+|------|------|-----------|---------|---------|
+| 1 | Data stream | Nabto stream | Raw PTY bytes | Bidirectional PTY relay, identical to SSH |
+| 2 | Control stream | Nabto stream (non-CoAP) | Length-prefixed CBOR | Session state, prompt lifecycle events, client resolve |
 
 ### CoAP Endpoints
 
-All require IAM authorization. Payloads use CBOR (content format 60).
+All require IAM authorization. Payloads are CBOR over CoAP (content format 60).
+
+CoAP and stream protocols are separate:
+- CoAP is used for request/response endpoints (`/terminal/attach`, `/terminal/resize`, `/terminal/sessions`, ...).
+- Port 2 control traffic is a stream protocol (framed CBOR), not CoAP.
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -191,11 +195,11 @@ Aliases: `a` for `attach`, `c`/`n`/`new`/`new-session` for `create`.
 1. Look up device bookmark from `~/.nabtoshell-client/` by name.
 2. Create a Nabto client connection with stored product ID, device ID, client private key, and SCT.
 3. `nabto_client_connection_connect()`.
-4. Send `POST /terminal/attach` or `POST /terminal/create` (CoAP) with session name and terminal dimensions from `ioctl(TIOCGWINSZ)`.
+4. Send `POST /terminal/attach` or `POST /terminal/create` over CoAP (CBOR payload) with session name and terminal dimensions from `ioctl(TIOCGWINSZ)`.
 5. Open stream on port 1 via `nabto_client_stream_open()`.
 6. Set local terminal to raw mode (`cfmakeraw`).
 7. Enter relay loop: `select()` on stdin and the Nabto stream fd (or use the async API with futures).
-8. Handle `SIGWINCH`: send `POST /terminal/resize` via CoAP when the local terminal is resized.
+8. Handle `SIGWINCH`: send `POST /terminal/resize` via CoAP (CBOR payload) when the local terminal is resized.
 9. On stream close or EOF, restore terminal and exit.
 
 ### Client Configuration
@@ -222,44 +226,44 @@ Aliases: `a` for `attach`, `c`/`n`/`new`/`new-session` for `create`.
 1. On the device list, the app connects to saved devices in the background.
 2. The control stream (port 2) delivers session lists and prompt lifecycle events. The app displays available tmux sessions per device and renders prompt overlays from server events.
 3. User taps a session to enter the terminal view.
-4. App sends `POST /terminal/attach` with session name and current terminal dimensions.
+4. App sends `POST /terminal/attach` over CoAP (CBOR payload) with session name and current terminal dimensions.
 5. App opens a stream via `connection.createStream()` and calls `stream.open()`.
 6. Stream relay begins: `stream.readSome()` feeds into SwiftTerm, SwiftTerm key events go to `stream.write()`.
 
 ### Connection Lifecycle
 
 ```
-Client                              Device Agent
-  |                                      |
-  |---- Connect (Nabto) --------------->|
-  |                                      |
-  |---- Control Stream Open (port 2) -->|
-  |<--- sessions list (CBOR, periodic) -|  (background, every 2s)
-  |                                      |
-  |  (user selects a session)            |
-  |                                      |
-  |---- POST /terminal/attach --------->|
-  |     {session: "main", cols, rows}    |
-  |<--- 2.01 Created -------------------|
-  |                                      |
-  |---- Data Stream Open (port 1) ----->|
-  |                                      | <- forkpty() + tmux attach
-  |<--- stream data (PTY output) -------|
-  |---- stream data (keystrokes) ------>|
-  |         ... interactive session ...  |
-  |                                      |
-  |<--- pattern_present (port 2, CBOR) -|  (prompt instance appears)
-  |<--- pattern_update (port 2, CBOR) --|  (same instance redraw/update)
-  |<--- pattern_gone (port 2, CBOR) ----|  (instance disappears)
-  |---- pattern_resolve (port 2) ------>|  (user action or dismiss with instance_id)
-  |                                      |
-  |---- POST /terminal/resize --------->|  (on device rotation)
-  |     {cols: 120, rows: 40}            |
-  |<--- 2.04 Changed -------------------|
-  |                                      |
-  |---- Stream Close ------------------>|
-  |---- Connection Close --------------->|
+Client                          Device Agent
+  |                                  |
+  |---- Connect (Nabto) ------------>|
+  |                                  |
+  |---- Open ctrl stream (p2) ------>|
+  |<--- sessions [p2/cbor] ----------|
+  |                                  |
+  |---- /terminal/attach [coap] ---->|
+  |     {session: "main", cols, rows}|
+  |<--- 2.01 Created [coap] ---------|
+  |                                  |
+  |---- Open data stream (p1) ------>|
+  |<--- PTY output [p1/raw] ---------|
+  |---- key bytes [p1/raw] --------->|
+  |                                  |
+  |<--- pattern_present [p2/cbor] ---|
+  |<--- pattern_update [p2/cbor] ----|
+  |<--- pattern_gone [p2/cbor] ------|
+  |---- pattern_resolve [p2/cbor] -->|
+  |                                  |
+  |---- /terminal/resize [coap] ---->|
+  |     {cols: 120, rows: 40}        |
+  |<--- 2.04 Changed [coap] ---------|
+  |                                  |
+  |---- Stream Close ---------------->|
+  |---- Connection Close ------------>|
 ```
+
+- Legend: `[coap]` = CoAP request/response with CBOR payload.
+- Legend: `[p2/cbor]` = control-stream framed CBOR message.
+- Legend: `[p1/raw]` = raw PTY byte stream.
 
 ---
 
@@ -307,21 +311,35 @@ PTY output (raw bytes)
 [iOS Overlay]
 ```
 
+### 7.2.1 Essential Decisions
+
+- Prompt detection is server-side only. Clients render and resolve; they do not parse terminal output.
+- Pattern config is V3-only and strict. Invalid config is a startup error, not a warning with fallback behavior.
+- Detector state is tied to PTY geometry. `POST /terminal/resize` updates both PTY size and detector terminal dimensions.
+- Numbered menus are emitted only when the extracted options are complete enough to be actionable:
+  - option numbers must start at `1`
+  - numbering must be contiguous (`1..N`)
+  - at least two actions must be present
+- VT parsing must implement redraw-critical control sequences used by modern TUIs, including:
+  - charset designation escapes (`ESC ( B`, etc.) which must be consumed and not rendered as text
+  - `CSI X` (ECH, Erase Character), which clears characters in-place without moving the cursor
+- iOS keeps a small `pattern_gone` guard window (minimum visible duration) to avoid overlay flicker if a short transient `gone` slips through.
+
 ### 7.3 Canonical Terminal State
 
 `TerminalState` is the only detector input. It is updated incrementally by parsing VT/ANSI control sequences from PTY bytes.
 
 Each snapshot includes:
-- normalized visible lines (UTF-8 safe)
+- visible screen lines (byte-preserving text cells)
 - cursor row/column
 - viewport dimensions
 - active screen mode (main/alt)
 - monotonic snapshot sequence
 
-Normalization rules are deterministic and replay-safe:
+Parser behavior is deterministic and replay-safe:
 - line endings normalized to LF
-- invalid or incomplete UTF-8 never exposed to rules
-- trailing cursor artifacts and purely decorative whitespace are normalized
+- charset designation control sequences are consumed, not rendered
+- erase-in-place operations (`CSI X`) are applied to the backing cell grid
 
 This eliminates stale prompt copies from detection logic because only the current screen is matched.
 
@@ -337,13 +355,12 @@ Config schema is V3 only (single format, no compatibility branches):
   "agents": {
     "claude-code": {
       "name": "Claude Code",
-      "detect": ["claude code", "claude.ai"],
-      "patterns": [
+      "rules": [
         {
           "id": "numbered_prompt",
           "type": "numbered_menu",
           "prompt_regex": "Do you want to .+\\?",
-          "item_regex": "^(?:[>*\\-\\u276F]\\s*)?(\\d+)\\.\\s+(.+)$",
+          "option_regex": "^\\s*([0-9]+)\\.\\s+(.+)$",
           "action_template": { "keys": "{number}" }
         }
       ]
@@ -351,6 +368,11 @@ Config schema is V3 only (single format, no compatibility branches):
   }
 }
 ```
+
+Load behavior:
+- all `*.json` files in `~/.nabtoshell/patterns/` are loaded in lexical filename order
+- agent IDs and pattern IDs must be unique in the merged config
+- any parse/validation error aborts startup
 
 Supported prompt types:
 
@@ -364,11 +386,11 @@ Supported prompt types:
 
 Each detected candidate prompt is assigned:
 
-`instance_id = hash(pattern_id, normalized_prompt, normalized_actions, normalized_anchor)`
+`instance_id = hash(pattern_id, pattern_type, prompt, actions, anchor_row)`
 
 Where:
-- `normalized_anchor` is a stable location fingerprint from the current snapshot region
-- `normalized_actions` preserves order and key mappings
+- `anchor_row` is the matched prompt row in the snapshot
+- actions preserve order and key mappings
 
 Properties:
 - same prompt across redraws -> same `instance_id`
@@ -394,12 +416,13 @@ none --present--> active(instance_id, rev=1) ----+
 Rules:
 - `present` is emitted once per new `instance_id`
 - `update` is emitted only for same `instance_id` with changed prompt/actions
-- `gone` is emitted once when instance is absent for configured window
+- `gone` is emitted once when instance is absent for `NABTOSHELL_PROMPT_ABSENCE_SNAPSHOTS` snapshots (`8`)
 - client resolve suppresses only that exact `instance_id`
 
 ### 7.7 Control Stream Protocol V2
 
 **Port:** 2  
+**Transport:** Nabto stream (not CoAP)  
 **Framing:** `[4-byte big-endian uint32 payload length][CBOR payload]`
 
 #### Messages: Agent to Client
@@ -474,7 +497,7 @@ Rules:
 Server event path:
 
 ```text
-Control stream (port 2)
+Control stream (port 2, framed CBOR)
     |
     v
 ConnectionManager.controlReadLoop()
@@ -496,10 +519,10 @@ User taps action/dismiss
     |
     +--> write keys to data stream (port 1, action only)
     |
-    +--> send pattern_resolve(instance_id, decision, keys?) on port 2
+    +--> send pattern_resolve(instance_id, decision, keys?) on control stream (port 2, framed CBOR)
 ```
 
-No client debounce is required. Overlay state follows server lifecycle events.
+Client still applies a short minimum-visible guard on `pattern_gone` to hide brief transients.
 
 ### 7.9 Determinism and Replay Guarantees
 
@@ -509,17 +532,17 @@ The detector must satisfy:
 2. Event sequence is invariant to PTY chunking.
 3. Continuous redraw of one prompt does not emit `gone` then `present` cycles.
 4. Resolving one prompt instance does not suppress a future distinct prompt.
+5. Numbered-menu events are never emitted with missing option `1`, numbering gaps, or charset artifacts in labels.
 
-Replay tests use `.ptyr` recordings and chunk-fuzz variants of the same recordings.
+Replay tests use `.ptyr` recordings (including `pty-log-7/8/9/10`) and chunk-split variants of the same recordings.
 
 ### 7.10 Tuning Parameters
 
 | Parameter | Purpose |
 |-----------|---------|
-| `gone_window_snapshots` / `gone_window_ms` | Delay before emitting `pattern_gone` |
-| `max_actions` | Cap for resolved action list size |
-| `resolved_ttl_ms` | How long resolved instance suppression is retained |
-| `snapshot_region_policy` | Anchor strategy for stable `instance_id` generation |
+| `NABTOSHELL_PROMPT_ABSENCE_SNAPSHOTS` | Snapshot count before emitting `pattern_gone` |
+| `max_scan_lines` (rule config) | How many rows below prompt are scanned for numbered options |
+| `NABTOSHELL_PROMPT_MAX_ACTIONS` | Hard cap for action list size |
 
 ### 7.11 Threading Model
 
@@ -531,7 +554,7 @@ Replay tests use `.ptyr` recordings and chunk-fuzz variants of the same recordin
 | PTY Reader | `pty_reader_thread` | Reads PTY fd, feeds detector, writes PTY bytes to Nabto stream |
 | Stream Reader | `stream_reader_thread` | Reads Nabto stream, writes to PTY fd |
 
-Prompt detection executes in the PTY reader thread (`nabtoshell_prompt_detector_feed()`), and event callbacks send V2 CBOR messages on the control stream.
+Prompt detection executes in the PTY reader thread (`nabtoshell_prompt_detector_feed()`), and event callbacks send V2 framed-CBOR messages on the control stream.
 
 #### Agent Threads per Control Stream
 
@@ -562,7 +585,7 @@ agent/
     nabtoshell_prompt_lifecycle.h / .c   # Instance FSM: present/update/gone/resolved
     nabtoshell_prompt_detector.h / .c    # End-to-end detector orchestration
     nabtoshell_pattern_config.h / .c     # JSON config parsing
-    nabtoshell_prompt_protocol.h / .c    # CBOR encode/decode for V2 prompt messages
+    nabtoshell_prompt_protocol.h / .c    # Framed-CBOR protocol for V2 control-stream prompt messages
     nabtoshell_coap_handler.h / .c       # CoAP endpoint scaffold
     nabtoshell_coap_attach.c             # POST /terminal/attach handler
     nabtoshell_coap_create.c             # POST /terminal/create handler
@@ -577,7 +600,7 @@ agent/
     test_prompt_lifecycle.c              # Instance lifecycle FSM tests
     test_prompt_detector_replay.c        # PTY replay and chunk-fuzz determinism tests
     test_pattern_config.c                # Config parsing tests
-    test_prompt_protocol.c               # Prompt protocol CBOR tests
+    test_prompt_protocol.c               # Framed-CBOR prompt protocol tests
     test_pattern_routing.c               # Pattern routing tests
 
 clients/
@@ -599,7 +622,7 @@ clients/
         PatternConfig.swift              # Config structs
         PatternConfigLoader.swift        # Bundle JSON loader
       Services/
-        ConnectionManager.swift          # Control stream read/write
+        ConnectionManager.swift          # Control stream transport + framed-CBOR read/write
         CBORHelpers.swift                # CBOR encoding/decoding
         NabtoService.swift               # Nabto connection management
         BookmarkStore.swift              # Device bookmark persistence
