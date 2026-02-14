@@ -77,14 +77,7 @@ struct TerminalScreen: View {
 
                     Spacer()
 
-                    connectionPill
-                        .padding(.trailing, 12)
-                        .padding(.top, 8)
-                }
-
-                if patternEngine.canRestoreHiddenMatch {
-                    HStack {
-                        Spacer()
+                    if patternEngine.canRestoreHiddenMatch {
                         Button {
                             patternEngine.restoreOverlay()
                         } label: {
@@ -96,14 +89,17 @@ struct TerminalScreen: View {
                             .fontWeight(.medium)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Color.gray.opacity(0.6))
+                            .background(Color.orange.opacity(0.85))
                             .foregroundColor(.white)
                             .clipShape(Capsule())
                         }
                         .accessibilityIdentifier("pattern-recall-pill")
-                        .padding(.trailing, 12)
                         .padding(.top, 8)
                     }
+
+                    connectionPill
+                        .padding(.trailing, 12)
+                        .padding(.top, 8)
                 }
                 Spacer()
             }
