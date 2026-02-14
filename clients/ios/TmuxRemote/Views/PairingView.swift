@@ -59,7 +59,7 @@ struct PairingView: View {
                 if let errorMessage {
                     Section {
                         Text(errorMessage)
-                            .foregroundColor(.red)
+                            .foregroundColor(.tmuxDestructive)
                             .font(.callout)
                     }
                 }

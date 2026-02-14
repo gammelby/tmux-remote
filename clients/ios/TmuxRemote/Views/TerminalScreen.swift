@@ -243,13 +243,13 @@ struct TerminalScreen: View {
         case .disconnected:
             return ("Disconnected", .gray)
         case .connecting:
-            return ("Connecting...", .blue)
+            return ("Connecting...", .tmuxAccent)
         case .connected:
-            return ("Connected", .green)
+            return ("Connected", .tmuxOnline)
         case .reconnecting(let attempt):
             return ("Reconnecting (\(attempt))...", .orange)
         case .offline:
-            return ("Offline", .red)
+            return ("Offline", .tmuxOffline)
         }
     }
 

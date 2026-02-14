@@ -106,12 +106,13 @@ class KeyboardAccessoryView: UIView {
     }
 
     private func updateCtrlAppearance(active: Bool) {
+        let accent = UIColor(named: "AccentColor") ?? UIColor.systemGreen
         if active {
-            ctrlButton?.backgroundColor = UIColor.systemBlue
+            ctrlButton?.backgroundColor = accent
             ctrlButton?.tintColor = .white
         } else {
             ctrlButton?.backgroundColor = UIColor.secondarySystemBackground
-            ctrlButton?.tintColor = .systemBlue
+            ctrlButton?.tintColor = accent
         }
     }
 
