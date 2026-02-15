@@ -2,11 +2,10 @@
 #include "tmuxremote_init.h"
 #include "tmuxremote_banner.h"
 #include "tmuxremote_device.h"
+#include "tmuxremote_keychain.h"
 
 #include <apps/common/device_config.h>
 #include <apps/common/logging.h>
-#include <apps/common/private_key.h>
-#include <apps/common/string_file.h>
 
 #include <nabto/nabto_device.h>
 
@@ -192,8 +191,6 @@ bool run_agent(const struct args* args)
     char buffer[512];
     snprintf(buffer, sizeof(buffer), "%s/config/device.json", args->homeDir);
     app.deviceConfigFile = strdup(buffer);
-    snprintf(buffer, sizeof(buffer), "%s/keys/device.key", args->homeDir);
-    app.deviceKeyFile = strdup(buffer);
     snprintf(buffer, sizeof(buffer), "%s/state/iam_state.json", args->homeDir);
     app.iamStateFile = strdup(buffer);
 
@@ -217,6 +214,41 @@ bool run_agent(const struct args* args)
         return false;
     }
 
+    bool useKeychain =
+        tmuxremote_config_get_keychain_key(&fsImpl, app.deviceConfigFile);
+    char legacyDeviceKeyFile[512];
+    snprintf(legacyDeviceKeyFile, sizeof(legacyDeviceKeyFile),
+             "%s/keys/device.key", args->homeDir);
+
+    app.deviceKeyFile = tmuxremote_device_key_file_path(
+        args->homeDir, deviceConfig.productId, deviceConfig.deviceId);
+    if (app.deviceKeyFile == NULL) {
+        printf("Could not allocate device key file path" NEWLINE);
+        device_config_deinit(&deviceConfig);
+        tmuxremote_deinit(&app);
+        nabto_device_free(globalDevice);
+        globalDevice = NULL;
+        return false;
+    }
+
+    if (!tmuxremote_ensure_namespaced_key_file(&fsImpl, legacyDeviceKeyFile,
+                                               app.deviceKeyFile))
+    {
+        printf("Warning: Could not prepare namespaced key file (%s)." NEWLINE,
+               app.deviceKeyFile);
+        printf("Falling back to legacy path: %s" NEWLINE, legacyDeviceKeyFile);
+        free(app.deviceKeyFile);
+        app.deviceKeyFile = strdup(legacyDeviceKeyFile);
+        if (app.deviceKeyFile == NULL) {
+            printf("Could not allocate legacy device key file path" NEWLINE);
+            device_config_deinit(&deviceConfig);
+            tmuxremote_deinit(&app);
+            nabto_device_free(globalDevice);
+            globalDevice = NULL;
+            return false;
+        }
+    }
+
     nabto_device_set_product_id(app.device, deviceConfig.productId);
     nabto_device_set_device_id(app.device, deviceConfig.deviceId);
 
@@ -232,7 +264,13 @@ bool run_agent(const struct args* args)
         nabto_device_set_p2p_port(app.device, 0);
     }
 
-    if (!load_or_create_private_key(app.device, &fsImpl, app.deviceKeyFile, &app.logger)) {
+    bool keychainUsed = false;
+    if (!tmuxremote_load_or_create_private_key(app.device, &fsImpl,
+                                               app.deviceKeyFile, &app.logger,
+                                               deviceConfig.productId,
+                                               deviceConfig.deviceId,
+                                               useKeychain, &keychainUsed))
+    {
         printf("Could not load or create the private key" NEWLINE);
         device_config_deinit(&deviceConfig);
         tmuxremote_deinit(&app);
@@ -240,6 +278,7 @@ bool run_agent(const struct args* args)
         globalDevice = NULL;
         return false;
     }
+    app.keychainKey = keychainUsed;
 
     nabto_device_set_app_name(app.device, "tmux-remote");
     nabto_device_set_app_version(app.device, TMUXREMOTE_VERSION);

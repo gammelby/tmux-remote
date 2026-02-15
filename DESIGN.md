@@ -57,6 +57,7 @@ tmux-remote grants remote shell access. A compromise means an attacker can execu
 - **Password Invite pairing only.** A one-time password is generated per invitation and closed after use. No other pairing mode is enabled.
 - **Every endpoint checks IAM.** CoAP handlers and stream listeners call `tmuxremote_iam_check_access()`/`tmuxremote_iam_check_access_ref()` before processing. Unpaired connections can only access pairing endpoints.
 - **DTLS with ECC.** All traffic is encrypted end-to-end by the Nabto platform. The basestation mediates connection setup but cannot decrypt traffic.
+- **Device key at-rest storage is explicit.** The device private key is stored either in macOS Keychain or in a namespaced key file under `~/.tmux-remote/keys/`.
 
 ### Security Properties
 
@@ -101,8 +102,10 @@ No configuration found. Creating initial setup.
 
 Product ID: pr-xxxxxxxx
 Device ID:  de-yyyyyyyy
+Store device key in macOS Keychain? [Y/n] y
 
 Generated device keypair.
+Key storage: macOS Keychain
 Fingerprint: 08c955a5f7505f16f03bc3e3e0db89ff56ce571e0dd6be153c5bae9174d62ac6
 
 Register this fingerprint in the Nabto Cloud Console before starting.
@@ -120,6 +123,7 @@ $ tmux-remote-agent
 # Device ID:      de-yyyyyyyy
 # Fingerprint:    08c955a5...
 # Version:        0.1.0
+# Key storage:    macOS Keychain
 #
 #  No users paired yet. Pair your phone by copying
 #  this string into the tmux-remote app:
@@ -166,12 +170,26 @@ Removed. The agent enforces invite-only pairing. Use `--init` for first setup an
 
 ```
 ~/.tmux-remote/
-  config/device.json          # Product ID, Device ID, server settings
+  config/device.json          # Product ID, Device ID, server settings, KeychainKey preference
   config/iam_config.json      # IAM policies, roles (static)
   state/iam_state.json        # Paired users and pending one-time invitations (mutable)
-  keys/device.key             # Device private key
+  keys/<productId>_<deviceId>.key  # Device private key (file-storage mode only)
   patterns/*.json             # Pattern definitions
 ```
+
+### Device Key Storage (Agent)
+
+- The agent device private key always remains local and is never sent to the basestation.
+- Storage mode is selected during `--init` on macOS:
+  - Interactive TTY: prompts `Store device key in macOS Keychain? [Y/n]`.
+  - Non-interactive mode: defaults to file storage; set `TMUX_REMOTE_KEY_STORAGE=keychain` to opt into keychain storage.
+- The selection is persisted as `KeychainKey` in `config/device.json`.
+- Key naming is per device identity (`productId`, `deviceId`) to avoid collisions:
+  - macOS Keychain account: `p=<productId>,d=<deviceId>` (service: `dk.ulrik.tmux-remote.devicekey`)
+  - File path: `~/.tmux-remote/keys/<productId>_<deviceId>.key` (invalid filename characters are sanitized to `_`)
+- Runtime fallback:
+  - If keychain storage is requested but unavailable, the agent falls back to file storage and logs a warning.
+  - The startup banner prints the actual storage used (`macOS Keychain` or concrete key file path).
 
 ## 5. CLI Client
 
@@ -642,8 +660,8 @@ clients/
         patterns.json                    # Bundled pattern definitions
 
 ~/.tmux-remote/
-  config/device.json                     # Product/device IDs
+  config/device.json                     # Product/device IDs + KeychainKey preference
   state/iam_state.json                   # Paired users
-  keys/device.key                        # Device private key
+  keys/<productId>_<deviceId>.key        # Device private key (file-storage mode only)
   patterns/*.json                        # Pattern definitions
 ```

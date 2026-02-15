@@ -49,6 +49,12 @@ void tmuxremote_print_banner(struct tmuxremote* app, const char* fingerprint)
     }
 
     printf("# Version:        %s" NEWLINE, TMUXREMOTE_VERSION);
+    if (app->keychainKey) {
+        printf("# Key storage:    macOS Keychain" NEWLINE);
+    } else {
+        printf("# Key storage:    %s" NEWLINE,
+               (app->deviceKeyFile != NULL) ? app->deviceKeyFile : "(unknown)");
+    }
     printf("#" NEWLINE);
 
     if (!hasPairedUsers) {
