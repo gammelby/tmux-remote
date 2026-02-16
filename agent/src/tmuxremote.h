@@ -47,6 +47,9 @@ struct tmuxremote {
     /* PTY recording file path (NULL if not recording) */
     char* recordPtyFile;
 
+    /* Key storage: true if using macOS Keychain */
+    bool keychainKey;
+
     /* Uptime tracking */
     time_t startTime;
 };

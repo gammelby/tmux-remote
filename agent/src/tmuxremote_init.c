@@ -1,9 +1,9 @@
 #include "tmuxremote_init.h"
 #include "tmuxremote_iam.h"
+#include "tmuxremote_keychain.h"
 #include "tmuxremote.h"
 
 #include <apps/common/device_config.h>
-#include <apps/common/private_key.h>
 #include <apps/common/random_string.h>
 #include <apps/common/string_file.h>
 
@@ -14,11 +14,10 @@
 
 #include <nabto/nabto_device.h>
 
-#include <cjson/cJSON.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define NEWLINE "\n"
 
@@ -30,9 +29,7 @@ static bool init_common(const char* homeDir, const char* productId,
 
     snprintf(buffer, sizeof(buffer), "%s/config/device.json", homeDir);
     char* deviceConfigFile = strdup(buffer);
-
-    snprintf(buffer, sizeof(buffer), "%s/keys/device.key", homeDir);
-    char* deviceKeyFile = strdup(buffer);
+    char* deviceKeyFile = NULL;
 
     snprintf(buffer, sizeof(buffer), "%s/state/iam_state.json", homeDir);
     char* iamStateFile = strdup(buffer);
@@ -86,6 +83,34 @@ static bool init_common(const char* homeDir, const char* productId,
         return false;
     }
 
+    deviceKeyFile = tmuxremote_device_key_file_path(homeDir, pidBuf, didBuf);
+    if (deviceKeyFile == NULL) {
+        printf("Could not allocate device key file path" NEWLINE);
+        free(deviceConfigFile);
+        free(deviceKeyFile);
+        free(iamStateFile);
+        return false;
+    }
+
+    /* Prompt for keychain storage on macOS */
+    bool useKeychain = false;
+    if (tmuxremote_keychain_available()) {
+        if (isatty(fileno(stdin))) {
+            char kcBuf[16] = {0};
+            printf("Store device key in macOS Keychain? [Y/n] ");
+            if (fgets(kcBuf, sizeof(kcBuf), stdin) != NULL) {
+                kcBuf[strcspn(kcBuf, "\n")] = 0;
+                useKeychain = (kcBuf[0] != 'n' && kcBuf[0] != 'N');
+            } else {
+                useKeychain = true;
+            }
+        } else {
+            const char* keyStorageEnv = getenv("TMUX_REMOTE_KEY_STORAGE");
+            useKeychain = (keyStorageEnv != NULL &&
+                           strcmp(keyStorageEnv, "keychain") == 0);
+        }
+    }
+
     /* Save device config */
     struct device_config dc;
     device_config_init(&dc);
@@ -98,6 +123,24 @@ static bool init_common(const char* homeDir, const char* productId,
         free(deviceKeyFile);
         free(iamStateFile);
         return false;
+    }
+
+    /* Persist keychain preference */
+    if (!tmuxremote_config_set_keychain_key(&fsImpl, deviceConfigFile,
+                                            useKeychain))
+    {
+        if (useKeychain) {
+            printf("Warning: Could not persist KeychainKey preference." NEWLINE);
+            printf("Falling back to file-based key storage." NEWLINE);
+            useKeychain = false;
+            if (!tmuxremote_config_set_keychain_key(&fsImpl, deviceConfigFile,
+                                                    false))
+            {
+                printf("Warning: Could not persist key storage preference in device config." NEWLINE);
+            }
+        } else {
+            printf("Warning: Could not persist key storage preference in device config." NEWLINE);
+        }
     }
 
     /* Create device and generate key */
@@ -114,7 +157,11 @@ static bool init_common(const char* homeDir, const char* productId,
     struct nn_log logger;
     memset(&logger, 0, sizeof(logger));
 
-    if (!load_or_create_private_key(device, &fsImpl, deviceKeyFile, &logger)) {
+    bool keychainUsed = false;
+    if (!tmuxremote_load_or_create_private_key(device, &fsImpl, deviceKeyFile,
+                                               &logger, pidBuf, didBuf,
+                                               useKeychain, &keychainUsed))
+    {
         printf("Failed to create device key" NEWLINE);
         nabto_device_free(device);
         device_config_deinit(&dc);
@@ -161,6 +208,11 @@ static bool init_common(const char* homeDir, const char* productId,
     printf("Device ID:  %s" NEWLINE, didBuf);
     printf(NEWLINE);
     printf("Generated device keypair." NEWLINE);
+    if (keychainUsed) {
+        printf("Key storage: macOS Keychain" NEWLINE);
+    } else {
+        printf("Key storage: %s" NEWLINE, deviceKeyFile);
+    }
     printf("Fingerprint: %s" NEWLINE, fingerprint);
     printf(NEWLINE);
     printf("Register this fingerprint in the Nabto Cloud Console before starting." NEWLINE);

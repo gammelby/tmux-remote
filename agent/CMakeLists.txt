@@ -48,6 +48,7 @@ set(src
   src/tmuxremote_session.c
   src/tmuxremote_tmux.c
   src/tmuxremote_banner.c
+  src/tmuxremote_keychain.c
   ${prompt_src}
 )
 
@@ -71,7 +72,9 @@ target_link_libraries(tmux-remote-agent
   PkgConfig::PCRE2
 )
 
-if(NOT APPLE)
+if(APPLE)
+  target_link_libraries(tmux-remote-agent "-framework Security" "-framework CoreFoundation")
+else()
   target_link_libraries(tmux-remote-agent util)
 endif()
 
