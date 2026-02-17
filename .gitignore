@@ -14,3 +14,8 @@ clients/ios/Pods/
 clients/ios/*.xcworkspace/
 xcuserdata/
 *.xcuserstate
+*.ptyr
+client*.txt
+device*.txt
+clients/ios/*xcodeproj
+clients/ios/build*
