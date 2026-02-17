@@ -19,6 +19,7 @@ struct DeviceListView: View {
     @State private var newSessionDevice: DeviceBookmark?
     @State private var probeStatuses: [String: ProbeStatus] = [:]
     @State private var showSettings = false
+    @State private var isRefreshing = false
 
     /// Tracks devices where we fell back to CoAP probing (old agent without control stream).
     private enum ProbeStatus {
@@ -38,10 +39,31 @@ struct DeviceListView: View {
         .navigationTitle("Agents")
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    showSettings = true
-                } label: {
-                    Image(systemName: "gear")
+                HStack(spacing: 16) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gear")
+                    }
+                    Button {
+                        guard !isRefreshing else { return }
+                        isRefreshing = true
+                        probeStatuses.removeAll()
+                        for device in bookmarkStore.devices {
+                            connectionManager.disconnect(deviceId: device.deviceId)
+                        }
+                        Task {
+                            await connectAllDevices()
+                            isRefreshing = false
+                        }
+                    } label: {
+                        if isRefreshing {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(isRefreshing)
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
