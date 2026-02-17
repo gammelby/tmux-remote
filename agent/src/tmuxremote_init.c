@@ -21,6 +21,28 @@
 
 #define NEWLINE "\n"
 
+static bool parse_key_storage_target(const char* targetStorage,
+                                     bool* outUseKeychain)
+{
+    if (targetStorage == NULL || outUseKeychain == NULL) {
+        return false;
+    }
+
+    if (strcmp(targetStorage, "filesystem") == 0 ||
+        strcmp(targetStorage, "file") == 0)
+    {
+        *outUseKeychain = false;
+        return true;
+    }
+
+    if (strcmp(targetStorage, "keychain") == 0) {
+        *outUseKeychain = true;
+        return true;
+    }
+
+    return false;
+}
+
 static bool init_common(const char* homeDir, const char* productId,
                         const char* deviceId)
 {
@@ -453,4 +475,88 @@ bool tmuxremote_do_remove_user(const char* homeDir, const char* username)
     nm_iam_state_free(state);
     free(iamStateFile);
     return true;
+}
+
+bool tmuxremote_do_move_device_key(const char* homeDir, const char* targetStorage)
+{
+    struct nm_fs fsImpl = nm_fs_posix_get_impl();
+    struct nn_log logger;
+    memset(&logger, 0, sizeof(logger));
+
+    bool targetUseKeychain = false;
+    if (!parse_key_storage_target(targetStorage, &targetUseKeychain)) {
+        printf("Invalid target '%s'." NEWLINE,
+               targetStorage != NULL ? targetStorage : "(null)");
+        printf("Use 'filesystem' or 'keychain'." NEWLINE);
+        return false;
+    }
+
+    if (targetUseKeychain && !tmuxremote_keychain_available()) {
+        printf("macOS Keychain storage is not available on this platform." NEWLINE);
+        return false;
+    }
+
+    char buffer[512];
+    snprintf(buffer, sizeof(buffer), "%s/config/device.json", homeDir);
+    char* deviceConfigFile = strdup(buffer);
+    if (deviceConfigFile == NULL) {
+        return false;
+    }
+
+    struct device_config dc;
+    device_config_init(&dc);
+    if (!load_device_config(&fsImpl, deviceConfigFile, &dc, &logger)) {
+        printf("Device configuration not found. Run --init first." NEWLINE);
+        device_config_deinit(&dc);
+        free(deviceConfigFile);
+        return false;
+    }
+
+    bool sourceUseKeychain =
+        tmuxremote_config_get_keychain_key(&fsImpl, deviceConfigFile);
+    if (sourceUseKeychain == targetUseKeychain) {
+        printf("Device key is already using %s storage." NEWLINE,
+               targetUseKeychain ? "keychain" : "filesystem");
+        device_config_deinit(&dc);
+        free(deviceConfigFile);
+        return true;
+    }
+
+    snprintf(buffer, sizeof(buffer), "%s/keys/device.key", homeDir);
+    char legacyDeviceKeyFile[512];
+    strncpy(legacyDeviceKeyFile, buffer, sizeof(legacyDeviceKeyFile) - 1);
+    legacyDeviceKeyFile[sizeof(legacyDeviceKeyFile) - 1] = '\0';
+
+    char* deviceKeyFile = tmuxremote_device_key_file_path(
+        homeDir, dc.productId, dc.deviceId);
+    if (deviceKeyFile == NULL) {
+        printf("Could not allocate device key file path." NEWLINE);
+        device_config_deinit(&dc);
+        free(deviceConfigFile);
+        return false;
+    }
+
+    if (!tmuxremote_ensure_namespaced_key_file(&fsImpl,
+                                               legacyDeviceKeyFile,
+                                               deviceKeyFile))
+    {
+        printf("Could not prepare namespaced key file: %s" NEWLINE, deviceKeyFile);
+        free(deviceKeyFile);
+        device_config_deinit(&dc);
+        free(deviceConfigFile);
+        return false;
+    }
+
+    bool ok = tmuxremote_move_private_key_storage(&fsImpl,
+                                                  deviceConfigFile,
+                                                  deviceKeyFile,
+                                                  dc.productId,
+                                                  dc.deviceId,
+                                                  sourceUseKeychain,
+                                                  targetUseKeychain);
+
+    free(deviceKeyFile);
+    device_config_deinit(&dc);
+    free(deviceConfigFile);
+    return ok;
 }

@@ -32,4 +32,12 @@ bool tmuxremote_config_set_keychain_key(struct nm_fs* fsImpl,
                                          const char* deviceConfigFile,
                                          bool useKeychain);
 
+bool tmuxremote_move_private_key_storage(struct nm_fs* fsImpl,
+                                          const char* deviceConfigFile,
+                                          const char* keyFile,
+                                          const char* productId,
+                                          const char* deviceId,
+                                          bool sourceUseKeychain,
+                                          bool targetUseKeychain);
+
 #endif

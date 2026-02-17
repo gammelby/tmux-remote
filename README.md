@@ -69,6 +69,22 @@ Copy the device fingerprint and register it in the Nabto Cloud Console for your 
 
 The pairing string is a one-time credential. After a client uses it, it is invalidated.
 
+### Optional: Move device key storage backend
+
+If you want to move an existing device private key between filesystem and macOS Keychain storage, use:
+
+```bash
+tmux-remote-agent --move-device-key keychain
+```
+
+or:
+
+```bash
+tmux-remote-agent --move-device-key filesystem
+```
+
+This is a migration operation, not just a lookup preference. The agent moves the same key, verifies the fingerprint, updates configuration and then removes the old copy when possible.
+
 ### Step 2: Start the agent
 
 ```bash
@@ -221,14 +237,17 @@ Options:
   -h, --help                Show help
   -v, --version             Show version
   -H, --home-dir <dir>      Home directory (default: ~/.tmux-remote/)
-      --log-level <level>   Log level: error, info, trace, debug (default: error)
-      --random-ports        Use random ports instead of defaults
       --init                Initialize configuration
-      --demo-init           Initialize with open pairing (for demos; prints warning)
-      --add-user <name>     Create a one-time pairing invitation
-      --remove-user <name>  Revoke a user's access
+      --demo-init           Removed (invite-only pairing enforced)
+      --add-user <name>     Create a pairing invitation for a new user
+      --remove-user <name>  Revoke access for a user
+      --move-device-key <filesystem|keychain>
+                            Move device private key between storage backends
   -p, --product-id <id>     Product ID (used with --init)
   -d, --device-id <id>      Device ID (used with --init)
+      --log-level <level>   Log level (error|info|trace|debug)
+      --random-ports        Use random ports
+      --record-pty <path>   Record raw PTY data to file
 ```
 
 ## CLI Client Reference

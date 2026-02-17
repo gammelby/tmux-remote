@@ -38,7 +38,8 @@ enum {
     OPTION_REMOVE_USER,
     OPTION_PRODUCT_ID,
     OPTION_DEVICE_ID,
-    OPTION_RECORD_PTY
+    OPTION_RECORD_PTY,
+    OPTION_MOVE_DEVICE_KEY
 };
 
 static volatile sig_atomic_t signalCount = 0;
@@ -70,6 +71,7 @@ struct args {
     char* productId;
     char* deviceId;
     char* recordPtyFile;
+    char* moveDeviceKey;
 };
 
 static void args_init(struct args* args);
@@ -190,6 +192,17 @@ int main(int argc, char** argv)
             status = false;
         } else {
             status = tmuxremote_do_remove_user(homeDir, args.removeUser);
+            if (homeDir != args.homeDir) {
+                free(homeDir);
+            }
+        }
+    } else if (args.moveDeviceKey != NULL) {
+        char* homeDir = args.homeDir ? args.homeDir : get_default_home_dir();
+        if (homeDir == NULL) {
+            printf("Cannot determine home directory" NEWLINE);
+            status = false;
+        } else {
+            status = tmuxremote_do_move_device_key(homeDir, args.moveDeviceKey);
             if (homeDir != args.homeDir) {
                 free(homeDir);
             }
@@ -465,6 +478,7 @@ void args_deinit(struct args* args)
     free(args->productId);
     free(args->deviceId);
     free(args->recordPtyFile);
+    free(args->moveDeviceKey);
 }
 
 bool parse_args(int argc, char** argv, struct args* args)
@@ -481,6 +495,7 @@ bool parse_args(int argc, char** argv, struct args* args)
     const char x10s[] = "p"; const char* x10l[] = { "product-id", 0 };
     const char x11s[] = "d"; const char* x11l[] = { "device-id", 0 };
     const char x12s[] = "";  const char* x12l[] = { "record-pty", 0 };
+    const char x13s[] = "";  const char* x13l[] = { "move-device-key", 0 };
 
     const struct { int k; int f; const char* s; const char* const* l; } opts[] = {
         { OPTION_HELP,        GOPT_NOARG, x1s,  x1l },
@@ -495,6 +510,7 @@ bool parse_args(int argc, char** argv, struct args* args)
         { OPTION_PRODUCT_ID,  GOPT_ARG,   x10s, x10l },
         { OPTION_DEVICE_ID,   GOPT_ARG,   x11s, x11l },
         { OPTION_RECORD_PTY,  GOPT_ARG,   x12s, x12l },
+        { OPTION_MOVE_DEVICE_KEY, GOPT_ARG, x13s, x13l },
         {0, 0, 0, 0}
     };
 
@@ -539,6 +555,9 @@ bool parse_args(int argc, char** argv, struct args* args)
     }
     if (gopt_arg(options, OPTION_RECORD_PTY, &tmp)) {
         args->recordPtyFile = strdup(tmp);
+    }
+    if (gopt_arg(options, OPTION_MOVE_DEVICE_KEY, &tmp)) {
+        args->moveDeviceKey = strdup(tmp);
     }
 
     gopt_free(options);
@@ -893,6 +912,8 @@ void print_help(void)
     printf("      --demo-init           Removed (invite-only pairing enforced)" NEWLINE);
     printf("      --add-user <name>     Create a pairing invitation for a new user" NEWLINE);
     printf("      --remove-user <name>  Revoke access for a user" NEWLINE);
+    printf("      --move-device-key <filesystem|keychain>" NEWLINE);
+    printf("                            Move device private key between storage backends" NEWLINE);
     printf("  -p, --product-id <id>     Product ID (used with --init)" NEWLINE);
     printf("  -d, --device-id <id>      Device ID (used with --init)" NEWLINE);
     printf("      --log-level <level>   Log level (error|info|trace|debug)" NEWLINE);

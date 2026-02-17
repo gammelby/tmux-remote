@@ -10,6 +10,7 @@
 #include <cjson/cJSON.h>
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -383,6 +384,374 @@ bool tmuxremote_load_or_create_private_key(NabtoDevice* device,
     printf("Falling back to file-based key storage." NEWLINE);
     return load_or_create_private_key(device, fsImpl, keyFile, logger);
 #endif
+}
+
+static const char* storage_name(bool useKeychain)
+{
+    return useKeychain ? "keychain" : "filesystem";
+}
+
+static bool fingerprint_for_private_key(const char* pemKey, char** fingerprintOut)
+{
+    if (pemKey == NULL || fingerprintOut == NULL) {
+        return false;
+    }
+
+    *fingerprintOut = NULL;
+
+    NabtoDevice* device = nabto_device_new();
+    if (device == NULL) {
+        return false;
+    }
+
+    NabtoDeviceError ec = nabto_device_set_private_key(device, pemKey);
+    if (ec != NABTO_DEVICE_EC_OK) {
+        nabto_device_free(device);
+        return false;
+    }
+
+    char* fp = NULL;
+    nabto_device_get_device_fingerprint(device, &fp);
+    nabto_device_free(device);
+    if (fp == NULL) {
+        return false;
+    }
+
+    *fingerprintOut = strdup(fp);
+    nabto_device_string_free(fp);
+    return (*fingerprintOut != NULL);
+}
+
+static bool load_private_key_from_file_storage(struct nm_fs* fsImpl,
+                                               const char* keyFile,
+                                               char** pemOut)
+{
+    if (fsImpl == NULL || keyFile == NULL || pemOut == NULL) {
+        return false;
+    }
+
+    *pemOut = NULL;
+    if (!string_file_load(fsImpl, keyFile, pemOut)) {
+        printf("Failed to load private key from file: %s" NEWLINE, keyFile);
+        return false;
+    }
+    if (*pemOut == NULL || (*pemOut)[0] == '\0') {
+        free(*pemOut);
+        *pemOut = NULL;
+        printf("Private key file was empty: %s" NEWLINE, keyFile);
+        return false;
+    }
+    return true;
+}
+
+static bool save_private_key_to_file_storage(struct nm_fs* fsImpl,
+                                             const char* keyFile,
+                                             const char* pemKey)
+{
+    if (fsImpl == NULL || keyFile == NULL || pemKey == NULL) {
+        return false;
+    }
+
+    if (!string_file_save(fsImpl, keyFile, (char*)pemKey)) {
+        printf("Failed to save private key to file: %s" NEWLINE, keyFile);
+        return false;
+    }
+    return true;
+}
+
+static bool delete_private_key_file_storage(const char* keyFile)
+{
+    if (keyFile == NULL) {
+        return false;
+    }
+
+    if (remove(keyFile) == 0 || errno == ENOENT) {
+        return true;
+    }
+
+    printf("Failed to delete source private key file %s: %s" NEWLINE,
+           keyFile,
+           strerror(errno));
+    return false;
+}
+
+#ifdef __APPLE__
+static bool keychain_account_for_device(const char* productId,
+                                        const char* deviceId,
+                                        char** outAccount)
+{
+    if (outAccount == NULL) {
+        return false;
+    }
+    *outAccount = tmuxremote_keychain_account_for_device(productId, deviceId);
+    if (*outAccount == NULL) {
+        printf("Missing product/device ID for keychain private key slot." NEWLINE);
+        return false;
+    }
+    return true;
+}
+
+static bool delete_private_key_keychain_storage(const char* serviceUtf8,
+                                                const char* accountUtf8)
+{
+    if (serviceUtf8 == NULL || accountUtf8 == NULL) {
+        return false;
+    }
+
+    CFStringRef service = CFStringCreateWithCString(
+        kCFAllocatorDefault, serviceUtf8, kCFStringEncodingUTF8);
+    CFStringRef account = CFStringCreateWithCString(
+        kCFAllocatorDefault, accountUtf8, kCFStringEncodingUTF8);
+    if (service == NULL || account == NULL) {
+        if (account != NULL) {
+            CFRelease(account);
+        }
+        if (service != NULL) {
+            CFRelease(service);
+        }
+        return false;
+    }
+
+    CFMutableDictionaryRef query = CFDictionaryCreateMutable(
+        kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+        &kCFTypeDictionaryValueCallBacks);
+    if (query == NULL) {
+        CFRelease(account);
+        CFRelease(service);
+        return false;
+    }
+
+    CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
+    CFDictionarySetValue(query, kSecAttrService, service);
+    CFDictionarySetValue(query, kSecAttrAccount, account);
+
+    OSStatus status = SecItemDelete(query);
+
+    CFRelease(query);
+    CFRelease(account);
+    CFRelease(service);
+
+    if (status == errSecSuccess || status == errSecItemNotFound) {
+        return true;
+    }
+
+    printf("Failed to delete keychain private key slot '%s' (error %d)." NEWLINE,
+           accountUtf8,
+           (int)status);
+    return false;
+}
+#endif
+
+static bool load_private_key_from_storage(struct nm_fs* fsImpl,
+                                          const char* keyFile,
+                                          const char* productId,
+                                          const char* deviceId,
+                                          bool useKeychain,
+                                          char** pemOut)
+{
+    if (!useKeychain) {
+        return load_private_key_from_file_storage(fsImpl, keyFile, pemOut);
+    }
+
+#ifdef __APPLE__
+    char* account = NULL;
+    bool ok = false;
+    if (!keychain_account_for_device(productId, deviceId, &account)) {
+        return false;
+    }
+
+    ok = tmuxremote_keychain_load_private_key_slot(KEYCHAIN_SERVICE, account, pemOut);
+    if (!ok) {
+        printf("Failed to load private key from keychain slot '%s'." NEWLINE, account);
+    }
+    free(account);
+    return ok;
+#else
+    (void)fsImpl;
+    (void)keyFile;
+    (void)productId;
+    (void)deviceId;
+    (void)pemOut;
+    printf("macOS Keychain storage is not available on this platform." NEWLINE);
+    return false;
+#endif
+}
+
+static bool save_private_key_to_storage(struct nm_fs* fsImpl,
+                                        const char* keyFile,
+                                        const char* productId,
+                                        const char* deviceId,
+                                        bool useKeychain,
+                                        const char* pemKey)
+{
+    if (!useKeychain) {
+        return save_private_key_to_file_storage(fsImpl, keyFile, pemKey);
+    }
+
+#ifdef __APPLE__
+    char* account = NULL;
+    bool ok = false;
+    if (!keychain_account_for_device(productId, deviceId, &account)) {
+        return false;
+    }
+
+    ok = tmuxremote_keychain_save_private_key_slot(KEYCHAIN_SERVICE, account, pemKey);
+    free(account);
+    return ok;
+#else
+    (void)fsImpl;
+    (void)keyFile;
+    (void)productId;
+    (void)deviceId;
+    (void)pemKey;
+    printf("macOS Keychain storage is not available on this platform." NEWLINE);
+    return false;
+#endif
+}
+
+static bool delete_private_key_from_storage(const char* keyFile,
+                                            const char* productId,
+                                            const char* deviceId,
+                                            bool useKeychain)
+{
+    if (!useKeychain) {
+        return delete_private_key_file_storage(keyFile);
+    }
+
+#ifdef __APPLE__
+    char* account = NULL;
+    bool ok = false;
+    if (!keychain_account_for_device(productId, deviceId, &account)) {
+        return false;
+    }
+
+    ok = delete_private_key_keychain_storage(KEYCHAIN_SERVICE, account);
+    free(account);
+    return ok;
+#else
+    (void)keyFile;
+    (void)productId;
+    (void)deviceId;
+    printf("macOS Keychain storage is not available on this platform." NEWLINE);
+    return false;
+#endif
+}
+
+bool tmuxremote_move_private_key_storage(struct nm_fs* fsImpl,
+                                          const char* deviceConfigFile,
+                                          const char* keyFile,
+                                          const char* productId,
+                                          const char* deviceId,
+                                          bool sourceUseKeychain,
+                                          bool targetUseKeychain)
+{
+    if (fsImpl == NULL || deviceConfigFile == NULL || keyFile == NULL) {
+        return false;
+    }
+
+    if (sourceUseKeychain == targetUseKeychain) {
+        printf("Device key is already using %s storage." NEWLINE,
+               storage_name(targetUseKeychain));
+        return true;
+    }
+
+    char* sourcePem = NULL;
+    if (!load_private_key_from_storage(fsImpl,
+                                       keyFile,
+                                       productId,
+                                       deviceId,
+                                       sourceUseKeychain,
+                                       &sourcePem))
+    {
+        printf("Could not load private key from source %s storage." NEWLINE,
+               storage_name(sourceUseKeychain));
+        return false;
+    }
+
+    char* sourceFingerprint = NULL;
+    if (!fingerprint_for_private_key(sourcePem, &sourceFingerprint)) {
+        printf("Could not parse source private key." NEWLINE);
+        free(sourcePem);
+        return false;
+    }
+
+    if (!save_private_key_to_storage(fsImpl,
+                                     keyFile,
+                                     productId,
+                                     deviceId,
+                                     targetUseKeychain,
+                                     sourcePem))
+    {
+        printf("Could not save private key to target %s storage." NEWLINE,
+               storage_name(targetUseKeychain));
+        free(sourcePem);
+        free(sourceFingerprint);
+        return false;
+    }
+
+    char* targetPem = NULL;
+    if (!load_private_key_from_storage(fsImpl,
+                                       keyFile,
+                                       productId,
+                                       deviceId,
+                                       targetUseKeychain,
+                                       &targetPem))
+    {
+        printf("Failed to verify target %s storage." NEWLINE,
+               storage_name(targetUseKeychain));
+        free(sourcePem);
+        free(sourceFingerprint);
+        return false;
+    }
+
+    char* targetFingerprint = NULL;
+    bool targetFingerprintOk = fingerprint_for_private_key(targetPem, &targetFingerprint);
+    free(targetPem);
+    if (!targetFingerprintOk || targetFingerprint == NULL) {
+        printf("Could not parse private key from target storage." NEWLINE);
+        free(sourcePem);
+        free(sourceFingerprint);
+        free(targetFingerprint);
+        return false;
+    }
+
+    if (strcmp(sourceFingerprint, targetFingerprint) != 0) {
+        printf("Private key move verification failed (fingerprint mismatch)." NEWLINE);
+        printf("Source fingerprint: %s" NEWLINE, sourceFingerprint);
+        printf("Target fingerprint: %s" NEWLINE, targetFingerprint);
+        free(sourcePem);
+        free(sourceFingerprint);
+        free(targetFingerprint);
+        return false;
+    }
+
+    if (!tmuxremote_config_set_keychain_key(fsImpl, deviceConfigFile, targetUseKeychain)) {
+        printf("Failed to persist key storage configuration." NEWLINE);
+        free(sourcePem);
+        free(sourceFingerprint);
+        free(targetFingerprint);
+        return false;
+    }
+
+    if (!delete_private_key_from_storage(keyFile,
+                                         productId,
+                                         deviceId,
+                                         sourceUseKeychain))
+    {
+        printf("Warning: switched to %s storage, but could not delete key from %s." NEWLINE,
+               storage_name(targetUseKeychain),
+               storage_name(sourceUseKeychain));
+    }
+
+    printf("Moved device key from %s to %s (fingerprint %s)." NEWLINE,
+           storage_name(sourceUseKeychain),
+           storage_name(targetUseKeychain),
+           sourceFingerprint);
+
+    free(sourcePem);
+    free(sourceFingerprint);
+    free(targetFingerprint);
+    return true;
 }
 
 bool tmuxremote_config_get_keychain_key(struct nm_fs* fsImpl,
