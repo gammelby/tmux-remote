@@ -306,7 +306,6 @@ class NabtoService {
                     return
                 }
                 attempt += 1
-                self.connectionManager.setDeviceState(.reconnecting(attempt: attempt), for: bookmark.deviceId)
 
                 let elapsed = Date().timeIntervalSince(startTime)
                 if self.reconnectLogic.shouldGiveUp(elapsedTime: elapsed) {
@@ -320,6 +319,7 @@ class NabtoService {
 
                 do {
                     self.connectionManager.disconnect(deviceId: bookmark.deviceId)
+                    self.connectionManager.setDeviceState(.reconnecting(attempt: attempt), for: bookmark.deviceId)
                     try await self.connect(bookmark: bookmark)
                     try await self.attach(bookmark: bookmark, session: session, cols: cols, rows: rows)
                     try await self.openStream(bookmark: bookmark)
@@ -341,6 +341,7 @@ class NabtoService {
                     if Task.isCancelled || !self.canAutoReconnect(deviceId: bookmark.deviceId, session: session) {
                         return
                     }
+                    self.connectionManager.setDeviceState(.reconnecting(attempt: attempt), for: bookmark.deviceId)
                     let delay = self.reconnectLogic.backoff(attempt: attempt)
                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 }

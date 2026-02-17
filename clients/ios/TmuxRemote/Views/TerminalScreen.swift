@@ -190,8 +190,15 @@ struct TerminalScreen: View {
             nabtoService.disconnect(keepConnection: true)
         }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active && initialConnectionDone {
-                handleForegroundReturn()
+            switch newPhase {
+            case .background:
+                nabtoService.closeStream()
+            case .active:
+                if initialConnectionDone {
+                    handleForegroundReturn()
+                }
+            default:
+                break
             }
         }
         .onChange(of: connectionManager.deviceStates[bookmark.deviceId]) { _, newState in
@@ -199,6 +206,7 @@ struct TerminalScreen: View {
                 initialConnectionDone &&
                 !isReconnecting &&
                 !isDismissing &&
+                scenePhase == .active &&
                 nabtoService.canAutoReconnect(deviceId: bookmark.deviceId, session: sessionName) {
                 handleStreamClosed()
             }

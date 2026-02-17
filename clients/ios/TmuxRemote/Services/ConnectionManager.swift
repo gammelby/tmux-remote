@@ -190,6 +190,14 @@ class ConnectionManager {
         deviceStates[deviceId] = .disconnected
     }
 
+    /// Disconnect all cached and pending connections.
+    func disconnectAll() {
+        let deviceIds = Set(connections.keys).union(pendingConnects.keys)
+        for deviceId in deviceIds {
+            disconnect(deviceId: deviceId)
+        }
+    }
+
     /// Cancel only the in-flight connect task for a device.
     /// Used when a view is dismissed while an initial resume connect is still running.
     func cancelPendingConnect(deviceId: String) {
