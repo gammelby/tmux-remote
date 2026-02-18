@@ -1,16 +1,17 @@
 # CLAUDE.md
 
-Read DESIGN.md before starting any work. It is the source of truth for architecture, protocol, security model, and design decisions.
+Read DESIGN.md before starting any work. It is the source of truth for architecture, protocol, security model and design decisions.
 
 ## Project overview
 
-TmuxRemote is a secure remote terminal tool using Nabto Edge P2P connectivity. It exposes tmux sessions on a machine to authenticated clients without SSH, port forwarding, or firewall configuration.
+TmuxRemote is a secure remote terminal tool using Nabto Edge P2P connectivity. It exposes tmux sessions on a machine to authenticated clients without SSH, port forwarding or firewall configuration.
 
-The repo contains three components that share no source code:
+The repo contains four components that share no source code:
 
 - `agent/` -- C, Nabto Embedded SDK (device side, serves terminal sessions, pattern detection)
 - `clients/cli/` -- C, Nabto Client SDK binary (client side, connects to agent)
 - `clients/ios/` -- Swift, NabtoEdgeClientSwift (client side, mobile terminal with pattern overlay UI)
+- `clients/android/` -- Kotlin, Nabto Edge Client SDK for Android (client side, mobile terminal with pattern overlay UI)
 
 ## Build
 
@@ -38,11 +39,20 @@ The Nabto Client SDK is fetched automatically via CMake FetchContent. No externa
 
 Open `clients/ios/TmuxRemote.xcodeproj` in Xcode. NabtoEdgeClientSwift is managed via CocoaPods.
 
+### Android app
+
+```bash
+cd clients/android
+./gradlew assembleDebug
+```
+
+APK output: `app/build/outputs/apk/debug/app-debug.apk`. Nabto Edge Client SDK and Termux terminal libraries are fetched via Gradle from Maven Central and JitPack.
+
 ## Architecture rules
 
 - The agent uses the **Nabto Embedded SDK** (open source, C). The clients use the **Nabto Client SDK** (binary release, C API). These are different SDKs. Do not mix them.
-- The agent is a generic PTY relay. It knows nothing about what runs in the terminal. Never add agent-side logic that depends on Claude Code, Codex, Aider, or any specific CLI tool. Pattern definitions are external JSON, not compiled in.
-- Pattern detection runs on the agent side via a pipeline (ANSI stripper, rolling buffer, PCRE2 regex matcher, pattern engine). Matches are pushed to clients via the control stream (port 2) as CBOR events. The iOS client is a pure display layer for pattern events. See DESIGN.md section 7.
+- The agent is a generic PTY relay. It knows nothing about what runs in the terminal. Never add agent-side logic that depends on Claude Code, Codex, Aider or any specific CLI tool. Pattern definitions are external JSON, not compiled in.
+- Pattern detection runs on the agent side via a pipeline (ANSI stripper, rolling buffer, PCRE2 regex matcher and pattern engine). Matches are pushed to clients via the control stream (port 2) as CBOR events. The iOS and Android clients are pure display layers for pattern events. See DESIGN.md section 7.
 - Communication: Nabto Streams for terminal data (port 1, raw bidirectional byte pipe) and control events (port 2, length-prefixed CBOR). CoAP for control messages (resize, session management). See DESIGN.md section 3.
 
 ## Security model
@@ -58,8 +68,9 @@ This is critical. TmuxRemote grants remote shell access. A compromise means arbi
 
 - Agent and CLI client: C (not C++). Match the style of the Nabto Embedded SDK examples.
 - iOS app: Swift, UIKit or SwiftUI.
+- Android app: Kotlin, Jetpack Compose.
 - Use CBOR (content format 60) for all CoAP payloads. Use tinycbor on the C side.
-- No em dashes in comments, docs, or output strings. Use colons, semicolons, commas, or separate sentences.
+- No em dashes in comments, docs or output strings. Use colons, semicolons, commas or separate sentences.
 
 ## CoAP endpoints (agent)
 
@@ -75,9 +86,9 @@ All endpoints require IAM authorization except pairing.
 
 ## Stream protocol
 
-Port 1: Raw bytes, no framing. Transparent PTY pipe. Terminal escape sequences are handled by the client (local terminal for CLI, SwiftTerm for iOS).
+Port 1: Raw bytes, no framing. Transparent PTY pipe. Terminal escape sequences are handled by the client (local terminal for CLI, SwiftTerm for iOS, Termux terminal-emulator for Android).
 
-Port 2: Control stream. Length-prefixed CBOR messages. Carries pattern match/dismiss events (agent to client), session state, and client dismiss messages (client to agent).
+Port 2: Control stream. Length-prefixed CBOR messages. Carries pattern match/dismiss events (agent to client), session state and client dismiss messages (client to agent).
 
 ## File layout
 
@@ -95,13 +106,18 @@ clients/
     TmuxRemote.xcodeproj/
     TmuxRemote/
 
+  android/
+    app/
+      build.gradle.kts
+      src/main/java/com/nabto/tmuxremote/
+
 DESIGN.md
 CLAUDE.md
 ```
 
 ## Development phase
 
-Phase 1 (agent + CLI client) and Phase 2a (iOS app with pattern overlays) are complete. Current work focuses on polish, testing, and publishing.
+Phase 1 (agent + CLI client), Phase 2a (iOS app with pattern overlays) and Phase 2b (Android app with pattern overlays) are complete. Current work focuses on polish, testing and publishing.
 
 ## Key references
 
@@ -111,6 +127,8 @@ Phase 1 (agent + CLI client) and Phase 2a (iOS app with pattern overlays) are co
 - Nabto tcp_tunnel_device (IAM reference): in the embedded SDK repo under `examples/tcp_tunnel_device/`
 - SwiftTerm: https://github.com/migueldeicaza/SwiftTerm
 - NabtoEdgeClientSwift: available via CocoaPods
+- Nabto Edge Client SDK for Android: available via Maven Central (`com.nabto.edge.client:library-ktx`)
+- Termux terminal-emulator/terminal-view: available via JitPack (`com.termux.termux-app:terminal-view`)
 
 ## Nabto SDK rules
 
@@ -120,7 +138,7 @@ The Nabto core runs its own event loop thread. All future callbacks execute on t
 
 - A callback function must never make blocking calls (pthread_join, waitpid, blocking write, contested mutex). This freezes the entire SDK.
 - Defer blocking work to a separate thread. See existing patterns: `cleanup_thread_func` in `tmuxremote_stream.c`, worker threads in `tmuxremote_coap_handler.c`.
-- This applies to both agent (C) and iOS client (Swift): Nabto SDK callbacks dispatch to the core thread. No synchronous I/O or long computation in these callbacks.
+- This applies to the agent (C), iOS client (Swift) and Android client (Kotlin): Nabto SDK callbacks dispatch to the core thread. No synchronous I/O or long computation in these callbacks.
 
 ### Shutdown sequence
 

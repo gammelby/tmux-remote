@@ -2,10 +2,10 @@
 
 ## 1. System Overview
 
-tmux-remote provides secure remote terminal access to tmux sessions using Nabto Edge peer-to-peer connectivity. It replaces SSH with a zero-configuration model: no port forwarding, firewall rules, or dynamic DNS. A lightweight agent runs on the host machine and relays PTY I/O over encrypted Nabto connections to authenticated clients.
+tmux-remote provides secure remote terminal access to tmux sessions using Nabto Edge peer-to-peer connectivity. It replaces SSH with a zero-configuration model: no port forwarding, firewall rules or dynamic DNS. A lightweight agent runs on the host machine and relays PTY I/O over encrypted Nabto connections to authenticated clients.
 
 ```
- iOS App / CLI Client
+ iOS App / Android App / CLI Client
        |
   [Nabto Edge P2P / DTLS]
        |
@@ -21,6 +21,7 @@ tmux-remote provides secure remote terminal access to tmux sessions using Nabto 
 | `agent/` | C | Nabto Embedded SDK | Serves terminal sessions, relays PTY data, detects patterns |
 | `clients/cli/` | C | Nabto Client SDK | Command-line terminal client |
 | `clients/ios/` | Swift | NabtoEdgeClientSwift | Mobile terminal with pattern overlay UI |
+| `clients/android/` | Kotlin | Nabto Edge Client SDK for Android | Mobile terminal with pattern overlay UI |
 
 The agent is tool-agnostic. It knows nothing about what runs inside the terminal. Pattern definitions are loaded from JSON configuration files and evaluated generically.
 
@@ -51,7 +52,7 @@ CoAP and stream protocols are separate:
 
 ## 4. Security Model
 
-tmux-remote grants remote shell access. A compromise means an attacker can execute arbitrary commands as the user running the agent. This is equivalent to SSH access, and the security posture must match or exceed SSH.
+tmux-remote grants remote shell access. A compromise means an attacker can execute arbitrary commands as the user running the agent. This is equivalent to SSH access. The security posture must match or exceed SSH.
 
 - **Single role: Owner.** Full access or no access. No "limited" roles. A multi-role model would be security theater for a remote shell.
 - **Password Invite pairing only.** A one-time password is generated per invitation and closed after use. No other pairing mode is enabled.
@@ -86,7 +87,7 @@ The pairing flow is identical across all clients. The transport is the same (Nab
 1. On `--init`, the agent pre-creates an initial owner invitation with a generated one-time password and SCT.
 2. The invite pairing string is printed during `--init` and shown on startup while no client has paired yet.
 3. The user copies it to their client (CLI command or mobile app paste).
-4. The client parses the pairing string, generates a keypair if needed, connects, and completes the PAKE-based key exchange. Public keys are exchanged and stored.
+4. The client parses the pairing string, generates a keypair if needed, connects and completes the PAKE-based key exchange. Public keys are exchanged and stored.
 5. The invitation is consumed. Pairing is now closed. No further clients can pair.
 6. To add another device, run `tmux-remote-agent --add-user <name>` at the server terminal.
 
@@ -193,7 +194,7 @@ Removed. The agent enforces invite-only pairing. Use `--init` for first setup an
 
 ## 5. CLI Client
 
-A command-line client for connecting to a tmux-remote agent from another computer. Uses the Nabto Client SDK (binary release). The CLI client is the simplest client and serves as the primary driver for developing and testing the agent. It is a transparent byte pipe: connects, opens a Nabto stream, and relays bytes between the stream and the local terminal's stdin/stdout.
+A command-line client for connecting to a tmux-remote agent from another computer. Uses the Nabto Client SDK (binary release). The CLI client is the simplest client and serves as the primary driver for developing and testing the agent. It is a transparent byte pipe: connects, opens a Nabto stream and relays bytes between the stream and the local terminal's stdin/stdout.
 
 ### Usage
 
@@ -211,7 +212,7 @@ Aliases: `a` for `attach`, `c`/`n`/`new`/`new-session` for `create`.
 ### Attach/Create Flow
 
 1. Look up device bookmark from `~/.tmux-remote-client/` by name.
-2. Create a Nabto client connection with stored product ID, device ID, client private key, and SCT.
+2. Create a Nabto client connection with stored product ID, device ID, client private key and SCT.
 3. `nabto_client_connection_connect()`.
 4. Send `POST /terminal/attach` or `POST /terminal/create` over CoAP (CBOR payload) with session name and terminal dimensions from `ioctl(TIOCGWINSZ)`.
 5. Open stream on port 1 via `nabto_client_stream_open()`.
@@ -228,12 +229,24 @@ Aliases: `a` for `attach`, `c`/`n`/`new`/`new-session` for `create`.
   devices.json            # Saved device bookmarks
 ```
 
-## 6. iOS App
+## 6. Mobile Apps (iOS and Android)
+
+The iOS and Android apps are functionally identical. Both are pure display layers for the agent: they render terminal output, display pattern overlay prompts from the agent's control stream and send user actions back. Neither app performs pattern detection.
+
+| Aspect | iOS | Android |
+|--------|-----|---------|
+| Language | Swift | Kotlin |
+| UI framework | SwiftUI | Jetpack Compose |
+| Terminal emulator | SwiftTerm | Termux terminal-emulator/terminal-view |
+| Nabto SDK | NabtoEdgeClientSwift (CocoaPods) | Nabto Edge Client SDK (Maven Central) |
+| CBOR library | SwiftCBOR | Jackson CBOR |
+| Key storage | iOS Keychain | Android EncryptedSharedPreferences |
+| Persistence | UserDefaults | SharedPreferences |
 
 ### Pairing (First Connection)
 
 1. User taps "Add Device" and pastes the pairing string from the agent's terminal.
-2. App parses the string to extract product ID, device ID, pairing password, and SCT.
+2. App parses the string to extract product ID, device ID, pairing password and SCT.
 3. App generates a client keypair (if not already created) and connects to the device.
 4. PAKE-based key exchange using the one-time password. Public keys are exchanged.
 5. Device stores the client's public key fingerprint; app stores the device bookmark.
@@ -246,7 +259,7 @@ Aliases: `a` for `attach`, `c`/`n`/`new`/`new-session` for `create`.
 3. User taps a session to enter the terminal view.
 4. App sends `POST /terminal/attach` over CoAP (CBOR payload) with session name and current terminal dimensions.
 5. App opens a stream via `connection.createStream()` and calls `stream.open()`.
-6. Stream relay begins: `stream.readSome()` feeds into SwiftTerm, SwiftTerm key events go to `stream.write()`.
+6. Stream relay begins: `stream.readSome()` feeds into the terminal emulator (SwiftTerm on iOS, Termux on Android), terminal key events go to `stream.write()`.
 
 ### Connection Lifecycle
 
@@ -292,7 +305,7 @@ Client                          Device Agent
 1. Detect interactive prompts from terminal UIs using the visible screen state, not historical text tails.
 2. Emit stable prompt lifecycle events with no match/dismiss oscillation during redraws.
 3. Assign a stable prompt instance identity so redraws of the same prompt do not create new overlays.
-4. Keep the iOS app as a renderer/action sender, not a detector.
+4. Keep the iOS and Android apps as renderers/action senders, not detectors.
 5. Keep the agent tool-agnostic: behavior is driven by external JSON rules.
 6. Guarantee deterministic replay behavior regardless of PTY chunk boundaries.
 
@@ -326,7 +339,7 @@ PTY output (raw bytes)
 [Control Stream Protocol V2]
     |
     v
-[iOS Overlay]
+[iOS/Android Overlay]
 ```
 
 ### 7.2.1 Essential Decisions
@@ -341,7 +354,7 @@ PTY output (raw bytes)
 - VT parsing must implement redraw-critical control sequences used by modern TUIs, including:
   - charset designation escapes (`ESC ( B`, etc.) which must be consumed and not rendered as text
   - `CSI X` (ECH, Erase Character), which clears characters in-place without moving the cursor
-- iOS keeps a small `pattern_gone` guard window (minimum visible duration) to avoid overlay flicker if a short transient `gone` slips through.
+- iOS and Android keep a small `pattern_gone` guard window (minimum visible duration) to avoid overlay flicker if a short transient `gone` slips through.
 
 ### 7.3 Canonical Terminal State
 
@@ -510,7 +523,9 @@ Rules:
 
 `decision: "dismiss"` omits `keys`.
 
-### 7.8 iOS Client Integration
+### 7.8 Mobile Client Integration (iOS and Android)
+
+The integration path is identical on both platforms. Class names are the same; only the language differs (Swift vs Kotlin).
 
 Server event path:
 
@@ -527,7 +542,7 @@ decode V2 event (present/update/gone)
 PatternEngine.applyServerEvent(instance_id,...)
     |
     v
-PatternOverlayView state update
+PatternOverlayView / PatternOverlaySheet state update
 ```
 
 User action path:
@@ -540,7 +555,7 @@ User taps action/dismiss
     +--> send pattern_resolve(instance_id, decision, keys?) on control stream (port 2, framed CBOR)
 ```
 
-Client still applies a short minimum-visible guard on `pattern_gone` to hide brief transients.
+Both clients apply a short minimum-visible guard on `pattern_gone` to hide brief transients.
 
 ### 7.9 Determinism and Replay Guarantees
 
@@ -550,7 +565,7 @@ The detector must satisfy:
 2. Event sequence is invariant to PTY chunking.
 3. Continuous redraw of one prompt does not emit `gone` then `present` cycles.
 4. Resolving one prompt instance does not suppress a future distinct prompt.
-5. Numbered-menu events are never emitted with missing option `1`, numbering gaps, or charset artifacts in labels.
+5. Numbered-menu events are never emitted with missing option `1`, numbering gaps or charset artifacts in labels.
 
 Replay tests use `.ptyr` recordings (including `pty-log-7/8/9/10`) and chunk-split variants of the same recordings.
 
@@ -572,7 +587,7 @@ Replay tests use `.ptyr` recordings (including `pty-log-7/8/9/10`) and chunk-spl
 | PTY Reader | `pty_reader_thread` | Reads PTY fd, feeds detector, writes PTY bytes to Nabto stream |
 | Stream Reader | `stream_reader_thread` | Reads Nabto stream, writes to PTY fd |
 
-Prompt detection executes in the PTY reader thread (`tmuxremote_prompt_detector_feed()`), and event callbacks send V2 framed-CBOR messages on the control stream.
+Prompt detection executes in the PTY reader thread (`tmuxremote_prompt_detector_feed()`). Event callbacks send V2 framed-CBOR messages on the control stream.
 
 #### Agent Threads per Control Stream
 
@@ -583,7 +598,7 @@ Prompt detection executes in the PTY reader thread (`tmuxremote_prompt_detector_
 
 #### Why Two Threads per Data Stream
 
-The PTY relay uses two blocking threads rather than a single async event loop because the Nabto Embedded SDK and POSIX have incompatible async models. The PTY is a file descriptor (async via `select`/`poll`/`kqueue`). The Nabto stream is future-based (async via `nabto_device_future_wait` or `nabto_device_future_set_callback`), with no exposed file descriptor. There is no SDK API to add external fds to the Nabto event loop, and no way to obtain a pollable fd from a Nabto stream. A single-threaded bridge would require a signaling pipe between the Nabto callback and a `poll` loop, adding complexity with no practical benefit. Two blocking threads, one per source, is the simplest correct approach.
+The PTY relay uses two blocking threads rather than a single async event loop because the Nabto Embedded SDK and POSIX have incompatible async models. The PTY is a file descriptor (async via `select`/`poll`/`kqueue`). The Nabto stream is future-based (async via `nabto_device_future_wait` or `nabto_device_future_set_callback`), with no exposed file descriptor. There is no SDK API to add external fds to the Nabto event loop and no way to obtain a pollable fd from a Nabto stream. A single-threaded bridge would require a signaling pipe between the Nabto callback and a `poll` loop, adding complexity with no practical benefit. Two blocking threads, one per source, is the simplest correct approach.
 
 #### Critical Rule: No Blocking in Nabto Callbacks
 

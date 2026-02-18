@@ -1,6 +1,6 @@
 # tmux-remote
 
-Secure remote terminal access over Nabto Edge P2P connectivity. Exposes tmux sessions on a machine to authenticated clients without SSH, port forwarding, or firewall configuration.
+Secure remote terminal access over Nabto Edge P2P connectivity. Exposes tmux sessions on a machine to authenticated clients without SSH, port forwarding or firewall configuration.
 
 All traffic is end-to-end encrypted (DTLS with ECC). No ports are opened on the agent machine; connectivity is established through the Nabto basestation which mediates P2P connection setup but never sees your data.
 
@@ -41,10 +41,11 @@ make client
 
 ### Overview
 
-tmux-remote has two components:
+tmux-remote has three components:
 
 - **Agent** (`tmux-remote-agent`): runs on the machine you want to access remotely. Serves tmux sessions over Nabto.
 - **CLI client** (`tmux-remote`): runs on the machine you are working from. Connects to a remote agent and opens an interactive terminal.
+- **Mobile apps** (iOS and Android): connect to a remote agent from your phone or tablet. Include pattern overlay UI for interactive prompts.
 
 The typical workflow is: initialize the agent, pair a client, then attach to a session.
 
@@ -168,7 +169,7 @@ Short aliases: `tmux-remote n`, `tmux-remote new`, `tmux-remote c`.
 tmux-remote devices
 ```
 
-Shows all saved device bookmarks with their names, product IDs, and device IDs.
+Shows all saved device bookmarks with their names, product IDs and device IDs.
 
 ### Client home directory
 
@@ -206,7 +207,7 @@ A single agent (one device ID) supports up to 8 concurrent connections. Multiple
 
 ### How it works
 
-When a client connects, it tells the agent which tmux session to attach to (via a CoAP control message). The agent then opens a PTY running `tmux attach-session -t <name>` and relays it over a Nabto stream. Each connection gets its own independent PTY, reader thread, and stream.
+When a client connects, it tells the agent which tmux session to attach to (via a CoAP control message). The agent then opens a PTY running `tmux attach-session -t <name>` and relays it over a Nabto stream. Each connection gets its own independent PTY, reader thread and stream.
 
 ```
 Agent (one device ID)
@@ -226,7 +227,7 @@ Agent (one device ID)
 - **Same session**: Alice and Bob both attach to "main". tmux multiplexes them: both see the same output and either can type. This is standard tmux shared-session behavior.
 - **Terminal resize**: Each client's resize events only affect its own PTY. If Alice resizes her terminal, Bob's is unaffected.
 
-No extra device IDs, agent instances, or configuration are needed for multiple sessions or clients.
+No extra device IDs, agent instances or configuration are needed for multiple sessions or clients.
 
 ## Agent Reference
 
