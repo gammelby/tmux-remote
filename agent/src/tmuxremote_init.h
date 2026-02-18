@@ -13,6 +13,8 @@ bool tmuxremote_do_add_user(const char* homeDir, const char* username);
 
 bool tmuxremote_do_remove_user(const char* homeDir, const char* username);
 
+bool tmuxremote_do_list_users(const char* homeDir);
+
 bool tmuxremote_do_move_device_key(const char* homeDir, const char* targetStorage);
 
 #endif

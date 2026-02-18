@@ -45,7 +45,8 @@ enum {
     OPTION_RECORD_PTY,
     OPTION_MOVE_DEVICE_KEY,
     OPTION_BACKGROUND,
-    OPTION_SILENT
+    OPTION_SILENT,
+    OPTION_LIST_USERS
 };
 
 static volatile sig_atomic_t signalCount = 0;
@@ -80,6 +81,7 @@ struct args {
     char* moveDeviceKey;
     bool background;
     bool silent;
+    bool listUsers;
 };
 
 static void args_init(struct args* args);
@@ -200,6 +202,17 @@ int main(int argc, char** argv)
             status = false;
         } else {
             status = tmuxremote_do_remove_user(homeDir, args.removeUser);
+            if (homeDir != args.homeDir) {
+                free(homeDir);
+            }
+        }
+    } else if (args.listUsers) {
+        char* homeDir = args.homeDir ? args.homeDir : get_default_home_dir();
+        if (homeDir == NULL) {
+            printf("Cannot determine home directory" NEWLINE);
+            status = false;
+        } else {
+            status = tmuxremote_do_list_users(homeDir);
             if (homeDir != args.homeDir) {
                 free(homeDir);
             }
@@ -564,6 +577,7 @@ bool parse_args(int argc, char** argv, struct args* args)
     const char x13s[] = "";  const char* x13l[] = { "move-device-key", 0 };
     const char x14s[] = "b"; const char* x14l[] = { "background", 0 };
     const char x15s[] = "s"; const char* x15l[] = { "silent", 0 };
+    const char x16s[] = "";  const char* x16l[] = { "list-users", 0 };
 
     const struct { int k; int f; const char* s; const char* const* l; } opts[] = {
         { OPTION_HELP,        GOPT_NOARG, x1s,  x1l },
@@ -581,6 +595,7 @@ bool parse_args(int argc, char** argv, struct args* args)
         { OPTION_MOVE_DEVICE_KEY, GOPT_ARG, x13s, x13l },
         { OPTION_BACKGROUND,  GOPT_NOARG, x14s, x14l },
         { OPTION_SILENT,      GOPT_NOARG, x15s, x15l },
+        { OPTION_LIST_USERS,  GOPT_NOARG, x16s, x16l },
         {0, 0, 0, 0}
     };
 
@@ -606,6 +621,9 @@ bool parse_args(int argc, char** argv, struct args* args)
     }
     if (gopt(options, OPTION_SILENT)) {
         args->silent = true;
+    }
+    if (gopt(options, OPTION_LIST_USERS)) {
+        args->listUsers = true;
     }
 
     const char* tmp = NULL;
@@ -988,6 +1006,7 @@ void print_help(void)
     printf("      --demo-init           Removed (invite-only pairing enforced)" NEWLINE);
     printf("      --add-user <name>     Create a pairing invitation for a new user" NEWLINE);
     printf("      --remove-user <name>  Revoke access for a user" NEWLINE);
+    printf("      --list-users          List all users (paired and pending)" NEWLINE);
     printf("      --move-device-key <filesystem|keychain>" NEWLINE);
     printf("                            Move device private key between storage backends" NEWLINE);
     printf("  -p, --product-id <id>     Product ID (used with --init)" NEWLINE);

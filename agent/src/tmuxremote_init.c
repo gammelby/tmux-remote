@@ -477,6 +477,88 @@ bool tmuxremote_do_remove_user(const char* homeDir, const char* username)
     return true;
 }
 
+bool tmuxremote_do_list_users(const char* homeDir)
+{
+    struct nm_fs fsImpl = nm_fs_posix_get_impl();
+    char buffer[512];
+
+    snprintf(buffer, sizeof(buffer), "%s/state/iam_state.json", homeDir);
+    char* iamStateFile = strdup(buffer);
+
+    snprintf(buffer, sizeof(buffer), "%s/config/device.json", homeDir);
+    char* deviceConfigFile = strdup(buffer);
+
+    struct nn_log logger;
+    memset(&logger, 0, sizeof(logger));
+
+    /* Load device config for product/device IDs (needed for pairing strings) */
+    struct device_config dc;
+    device_config_init(&dc);
+    if (!load_device_config(&fsImpl, deviceConfigFile, &dc, &logger)) {
+        printf("Device configuration not found. Run --init first." NEWLINE);
+        free(iamStateFile);
+        free(deviceConfigFile);
+        return false;
+    }
+
+    /* Load IAM state */
+    char* str = NULL;
+    if (!string_file_load(&fsImpl, iamStateFile, &str)) {
+        printf("IAM state not found. Run --init first." NEWLINE);
+        device_config_deinit(&dc);
+        free(iamStateFile);
+        free(deviceConfigFile);
+        return false;
+    }
+
+    struct nm_iam_state* state = nm_iam_state_new();
+    if (!nm_iam_serializer_state_load_json(state, str, &logger)) {
+        printf("Failed to parse IAM state." NEWLINE);
+        nm_iam_state_free(state);
+        free(str);
+        device_config_deinit(&dc);
+        free(iamStateFile);
+        free(deviceConfigFile);
+        return false;
+    }
+    free(str);
+
+    struct nm_iam_user* user = NULL;
+    bool anyUser = false;
+    NN_LLIST_FOREACH(user, &state->users) {
+        if (user->username == NULL) {
+            continue;
+        }
+        anyUser = true;
+
+        bool paired = !nn_llist_empty(&user->fingerprints);
+        if (paired) {
+            printf("%-16s  paired" NEWLINE, user->username);
+            struct nm_iam_user_fingerprint* fp = NULL;
+            NN_LLIST_FOREACH(fp, &user->fingerprints) {
+                printf("  fingerprint: %s" NEWLINE, fp->fingerprint);
+            }
+        } else {
+            printf("%-16s  pending" NEWLINE, user->username);
+            if (user->password != NULL && user->sct != NULL) {
+                printf("  pairing string: p=%s,d=%s,u=%s,pwd=%s,sct=%s" NEWLINE,
+                       dc.productId, dc.deviceId,
+                       user->username, user->password, user->sct);
+            }
+        }
+    }
+
+    if (!anyUser) {
+        printf("No users configured. Run --init or --add-user." NEWLINE);
+    }
+
+    nm_iam_state_free(state);
+    device_config_deinit(&dc);
+    free(iamStateFile);
+    free(deviceConfigFile);
+    return true;
+}
+
 bool tmuxremote_do_move_device_key(const char* homeDir, const char* targetStorage)
 {
     struct nm_fs fsImpl = nm_fs_posix_get_impl();
