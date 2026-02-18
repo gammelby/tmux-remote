@@ -167,12 +167,21 @@ bool tmuxremote_config_add_device(struct tmuxremote_client_config* config,
 struct tmuxremote_device_bookmark* tmuxremote_config_find_device(
     struct tmuxremote_client_config* config, const char* name)
 {
+    /* Try bookmark name or device ID first (exact match takes priority) */
     for (int i = 0; i < config->deviceCount; i++) {
         if (strcmp(config->devices[i].name, name) == 0 ||
             strcmp(config->devices[i].deviceId, name) == 0) {
             return &config->devices[i];
         }
     }
+
+    /* Try bookmark index (e.g. "0", "12") */
+    char* end = NULL;
+    long idx = strtol(name, &end, 10);
+    if (end != name && *end == '\0' && idx >= 0 && idx < config->deviceCount) {
+        return &config->devices[idx];
+    }
+
     return NULL;
 }
 

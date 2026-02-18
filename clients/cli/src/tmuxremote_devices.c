@@ -20,14 +20,15 @@ int tmuxremote_cmd_devices(int argc, char** argv)
         printf("Use 'tmux-remote pair <pairing-string>' to pair with a device.\n");
     } else {
         printf("Saved devices:\n");
-        printf("  %-20s %-14s %-14s %s\n", "NAME", "PRODUCT", "DEVICE", "FINGERPRINT");
+        printf("       %-20s %-14s %-14s %s\n", "NAME", "PRODUCT", "DEVICE", "FINGERPRINT");
         for (int i = 0; i < config.deviceCount; i++) {
             char fpShort[18] = {0};
             if (config.devices[i].fingerprint[0] != '\0') {
                 snprintf(fpShort, sizeof(fpShort), "%.12s...",
                          config.devices[i].fingerprint);
             }
-            printf("  %-20s %-14s %-14s %s\n",
+            printf("  [%2d] %-20s %-14s %-14s %s\n",
+                   i,
                    config.devices[i].name,
                    config.devices[i].productId,
                    config.devices[i].deviceId,
