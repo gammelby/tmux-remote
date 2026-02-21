@@ -164,6 +164,20 @@ bool tmuxremote_config_add_device(struct tmuxremote_client_config* config,
     return tmuxremote_config_save_devices(config);
 }
 
+bool tmuxremote_config_replace_device(struct tmuxremote_client_config* config,
+                                      const char* deviceId,
+                                      const struct tmuxremote_device_bookmark* device)
+{
+    for (int i = 0; i < config->deviceCount; i++) {
+        if (strcmp(config->devices[i].deviceId, deviceId) == 0) {
+            memcpy(&config->devices[i], device,
+                   sizeof(struct tmuxremote_device_bookmark));
+            return tmuxremote_config_save_devices(config);
+        }
+    }
+    return false;
+}
+
 struct tmuxremote_device_bookmark* tmuxremote_config_find_device(
     struct tmuxremote_client_config* config, const char* name)
 {

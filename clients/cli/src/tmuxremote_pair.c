@@ -13,18 +13,21 @@
 int tmuxremote_cmd_pair(int argc, char** argv)
 {
     if (argc < 2) {
-        printf("Usage: tmux-remote pair <pairing-string> [--name <friendly-name>]\n");
+        printf("Usage: tmux-remote pair <pairing-string> [--name <friendly-name>] [--force]\n");
         return 1;
     }
 
     const char* pairingStr = argv[1];
     const char* friendlyName = NULL;
+    bool force = false;
 
-    /* Parse optional --name argument */
+    /* Parse optional arguments */
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--name") == 0 && i + 1 < argc) {
             friendlyName = argv[i + 1];
             i++;
+        } else if (strcmp(argv[i], "--force") == 0 || strcmp(argv[i], "-f") == 0) {
+            force = true;
         }
     }
 
@@ -47,11 +50,23 @@ int tmuxremote_cmd_pair(int argc, char** argv)
     /* Check if already paired with this device */
     struct tmuxremote_device_bookmark* existing =
         tmuxremote_config_find_device(&config, info.deviceId);
+    bool replacing = false;
     if (existing != NULL) {
-        printf("Already paired with agent '%s' (saved as '%s').\n",
-               info.deviceId, existing->name);
-        tmuxremote_config_deinit(&config);
-        return 1;
+        if (force) {
+            replacing = true;
+        } else {
+            printf("Already paired with agent '%s' (saved as '%s').\n",
+                   info.deviceId, existing->name);
+            printf("Overwrite existing bookmark? [y/N] ");
+            fflush(stdout);
+            int ch = getchar();
+            if (ch != 'y' && ch != 'Y') {
+                printf("Aborted.\n");
+                tmuxremote_config_deinit(&config);
+                return 1;
+            }
+            replacing = true;
+        }
     }
 
     /* Create client and connection */
@@ -170,7 +185,13 @@ int tmuxremote_cmd_pair(int argc, char** argv)
         nabto_client_string_free(deviceFingerprint);
     }
 
-    if (!tmuxremote_config_add_device(&config, &bookmark)) {
+    bool saved;
+    if (replacing) {
+        saved = tmuxremote_config_replace_device(&config, info.deviceId, &bookmark);
+    } else {
+        saved = tmuxremote_config_add_device(&config, &bookmark);
+    }
+    if (!saved) {
         printf("Failed to save agent bookmark\n");
     }
 

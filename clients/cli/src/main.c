@@ -97,7 +97,7 @@ void print_help(void)
     printf("Usage: tmux-remote [global options] <command> [options]\n");
     printf("\n");
     printf("Commands:\n");
-    printf("  pair <pairing-string>          One-time pairing with an agent\n");
+    printf("  pair <pairing-string> [--force] One-time pairing with an agent\n");
     printf("  attach <agent> [session]       Attach to an existing tmux session (alias: a)\n");
     printf("  create <agent> [session]       Create a new session and attach (aliases: new, n, c)\n");
     printf("  sessions <agent>               List tmux sessions on an agent\n");
