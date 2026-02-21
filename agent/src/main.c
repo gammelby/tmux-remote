@@ -409,13 +409,6 @@ bool run_agent(const struct args* args)
     tmuxremote_stream_listener_init(&app.streamListener, app.device, &app);
     tmuxremote_control_stream_listener_init(&app.controlStreamListener, app.device, &app);
 
-    /* Print banner */
-    char* deviceFingerprint = NULL;
-    nabto_device_get_device_fingerprint(app.device, &deviceFingerprint);
-
-    tmuxremote_print_banner(&app, deviceFingerprint);
-    nabto_device_string_free(deviceFingerprint);
-
     if (args->background) {
         char pidPath[512];
         char logPath[512];
@@ -465,6 +458,13 @@ bool run_agent(const struct args* args)
         setvbuf(stderr, NULL, _IONBF, 0);
         info_printf("Agent started (PID %d)" NEWLINE, getpid());
     }
+
+    /* Print banner (goes to log file when daemonized) */
+    char* deviceFingerprint = NULL;
+    nabto_device_get_device_fingerprint(app.device, &deviceFingerprint);
+
+    tmuxremote_print_banner(&app, deviceFingerprint);
+    nabto_device_string_free(deviceFingerprint);
 
     /* Device event listener and signal handling.
        The SIGINT handler only sets flags; all SDK calls happen here. */
