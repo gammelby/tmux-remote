@@ -58,7 +58,11 @@ target_include_directories(tmux-remote PRIVATE
 if(APPLE)
   set(NABTO_CLIENT_SDK_LIB_DIR ${nabto_client_sdk_SOURCE_DIR}/lib/macos-universal)
 elseif(UNIX)
-  set(NABTO_CLIENT_SDK_LIB_DIR ${nabto_client_sdk_SOURCE_DIR}/lib/linux-x86_64)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    set(NABTO_CLIENT_SDK_LIB_DIR ${nabto_client_sdk_SOURCE_DIR}/lib/linux-aarch64)
+  else()
+    set(NABTO_CLIENT_SDK_LIB_DIR ${nabto_client_sdk_SOURCE_DIR}/lib/linux-x86_64)
+  endif()
 endif()
 
 target_link_directories(tmux-remote PRIVATE ${NABTO_CLIENT_SDK_LIB_DIR})
@@ -69,9 +73,15 @@ target_link_libraries(tmux-remote
   Threads::Threads
 )
 
+if(APPLE)
+  set(_rpath "@loader_path")
+else()
+  set(_rpath "$ORIGIN")
+endif()
+
 set_target_properties(tmux-remote PROPERTIES
   BUILD_RPATH "${NABTO_CLIENT_SDK_LIB_DIR}"
-  INSTALL_RPATH "${NABTO_CLIENT_SDK_LIB_DIR}"
+  INSTALL_RPATH "${_rpath}"
 )
 
 install(TARGETS tmux-remote RUNTIME DESTINATION bin)
