@@ -8,7 +8,7 @@ All traffic is end-to-end encrypted (DTLS with ECC). No ports are opened on the 
 
 - CMake 3.14+, Ninja (or Make)
 - tmux installed on the agent machine
-- A device identity from the [Nabto Cloud Console](https://console.cloud.nabto.com/) (Product ID + Device ID)
+- A device identity from [tmux-remote.ulrik.dk](https://tmux-remote.ulrik.dk) (Product ID + Device ID)
 - Python 3 and pytest for integration tests
 
 ## Building
@@ -50,7 +50,7 @@ The typical workflow is: initialize the agent, pair a client, then attach to a s
 
 ### Step 1: Initialize the agent
 
-On the machine you want to access remotely, create a device identity in the [Nabto Cloud Console](https://console.cloud.nabto.com/) and initialize the agent:
+On the machine you want to access remotely, register at [tmux-remote.ulrik.dk](https://tmux-remote.ulrik.dk) to get a Product ID and Device ID, then initialize the agent:
 
 ```bash
 tmux-remote-agent --init -p pr-xxxxxxxx -d de-yyyyyyyy
@@ -65,7 +65,7 @@ Pairing string for the first client:
 p=pr-xxxxxxxx,d=de-yyyyyyyy,u=owner,pwd=CbAHaqpKKrhK,sct=TUfe3n3hhhM9
 ```
 
-Copy the device fingerprint and register it in the Nabto Cloud Console for your device.
+Copy the device fingerprint and register it in the [dashboard](https://tmux-remote.ulrik.dk/dashboard) for your device.
 
 The pairing string is a one-time credential. After a client uses it, it is invalidated.
 
@@ -293,9 +293,8 @@ Integration tests require a running agent with real Nabto Cloud credentials.
 ### Setup
 
 ```bash
-# Initialize test server
+# Initialize test server (get credentials from https://tmux-remote.ulrik.dk)
 make init-test-server PRODUCT_ID=pr-xxx DEVICE_ID=de-xxx
-# Register the printed fingerprint in the Nabto Cloud Console
 
 # Terminal 1: start the agent
 make run-test-server
@@ -325,4 +324,4 @@ make run-tests-online PYTHON=.venv/bin/python3
 
 ## Architecture
 
-See SPEC.md for the full product specification and CLAUDE.md for development instructions.
+See the [deep dive](https://tmux-remote.ulrik.dk/deep-dive) for a detailed architecture overview.
