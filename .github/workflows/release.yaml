@@ -1,0 +1,254 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            os: linux
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            os: linux
+            arch: arm64
+          - runner: macos-latest
+            os: macos
+            arch: arm64
+
+    runs-on: ${{ matrix.runner }}
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config libpcre2-dev patchelf
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos'
+        run: |
+          brew install cmake ninja pcre2
+
+      - name: Build agent
+        run: |
+          cd agent
+          cmake -B _build -G Ninja -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          cmake --build _build
+
+      - name: Build CLI client
+        run: |
+          cd clients/cli
+          cmake -B _build -G Ninja -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          cmake --build _build
+
+      - name: Package release archive
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          ARCHIVE_NAME="tmux-remote-${TAG}-${{ matrix.os }}-${{ matrix.arch }}"
+          mkdir -p "${ARCHIVE_NAME}"
+
+          cp agent/_build/tmux-remote-agent "${ARCHIVE_NAME}/"
+          cp clients/cli/_build/tmux-remote "${ARCHIVE_NAME}/"
+          cp README.md "${ARCHIVE_NAME}/"
+
+          # Bundle the Nabto Client SDK shared library
+          SDK_DIR="clients/cli/_build/_deps/nabto_client_sdk-src/lib"
+          if [ "${{ matrix.os }}" = "macos" ]; then
+            cp "${SDK_DIR}/macos-universal/libnabto_client.dylib" "${ARCHIVE_NAME}/"
+          elif [ "${{ matrix.arch }}" = "arm64" ]; then
+            cp "${SDK_DIR}/linux-aarch64/libnabto_client.so" "${ARCHIVE_NAME}/"
+          else
+            cp "${SDK_DIR}/linux-x86_64/libnabto_client.so" "${ARCHIVE_NAME}/"
+          fi
+
+          # Fix RPATH so the CLI binary finds libnabto_client next to itself
+          if [ "${{ matrix.os }}" = "linux" ]; then
+            patchelf --set-rpath '$ORIGIN' "${ARCHIVE_NAME}/tmux-remote"
+          elif [ "${{ matrix.os }}" = "macos" ]; then
+            install_name_tool -add_rpath @loader_path "${ARCHIVE_NAME}/tmux-remote" 2>/dev/null || true
+          fi
+
+          tar czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
+          echo "ARCHIVE_NAME=${ARCHIVE_NAME}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ env.ARCHIVE_NAME }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    name: Create Release
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/*.tar.gz
+
+  update-tap:
+    needs: release
+    runs-on: ubuntu-latest
+    name: Update Homebrew Tap
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate formula
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          BASE_URL="https://github.com/gammelby/tmux-remote/releases/download/${TAG}"
+
+          SHA_MACOS_ARM64=$(sha256sum artifacts/tmux-remote-${TAG}-macos-arm64.tar.gz | cut -d' ' -f1)
+          SHA_LINUX_AMD64=$(sha256sum artifacts/tmux-remote-${TAG}-linux-amd64.tar.gz | cut -d' ' -f1)
+          SHA_LINUX_ARM64=$(sha256sum artifacts/tmux-remote-${TAG}-linux-arm64.tar.gz | cut -d' ' -f1)
+
+          mkdir -p tap/Formula
+
+          cat > tap/Formula/tmux-remote.rb << FORMULA
+          class TmuxRemote < Formula
+            desc "Secure remote terminal access via Nabto P2P connectivity"
+            homepage "https://github.com/gammelby/tmux-remote"
+            version "${VERSION}"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "${BASE_URL}/tmux-remote-${TAG}-macos-arm64.tar.gz"
+                sha256 "${SHA_MACOS_ARM64}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "${BASE_URL}/tmux-remote-${TAG}-linux-arm64.tar.gz"
+                sha256 "${SHA_LINUX_ARM64}"
+              else
+                url "${BASE_URL}/tmux-remote-${TAG}-linux-amd64.tar.gz"
+                sha256 "${SHA_LINUX_AMD64}"
+              end
+            end
+
+            depends_on "tmux"
+
+            depends_on "patchelf" => :build if OS.linux?
+
+            def install
+              bin.install "tmux-remote"
+              bin.install "tmux-remote-agent"
+              lib.install Dir["*.dylib", "*.so"]
+
+              # Fix rpaths: binaries ship with @loader_path / \$ORIGIN pointing
+              # to the same directory. In Homebrew, lib/ is a sibling of bin/.
+              if OS.mac?
+                system "install_name_tool", "-delete_rpath", "@loader_path",
+                       bin/"tmux-remote"
+                system "install_name_tool", "-add_rpath",
+                       "@loader_path/../lib", bin/"tmux-remote"
+              elsif OS.linux?
+                system "patchelf", "--set-rpath", lib.to_s, bin/"tmux-remote"
+              end
+            end
+
+            def caveats
+              <<~EOS
+                tmux-remote-agent: serves your tmux sessions over Nabto P2P
+                tmux-remote: connects to a remote tmux-remote-agent
+              EOS
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/tmux-remote --version", 1)
+            end
+          end
+          FORMULA
+
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' tap/Formula/tmux-remote.rb
+
+          cat > tap/README.md << 'README'
+          # gammelby/homebrew-tap
+
+          Homebrew tap for [tmux-remote](https://github.com/gammelby/tmux-remote): secure remote terminal access via Nabto P2P connectivity.
+
+          ## Install
+
+          ```bash
+          brew tap gammelby/tap
+          brew install tmux-remote
+          ```
+
+          ## What gets installed
+
+          - `tmux-remote`: CLI client to connect to remote tmux sessions
+          - `tmux-remote-agent`: agent that serves tmux sessions over Nabto P2P
+
+          ## Updating
+
+          ```bash
+          brew upgrade tmux-remote
+          ```
+
+          This tap is automatically updated when new releases are published.
+          README
+
+          sed -i 's/^          //' tap/README.md
+
+      - name: Push to tap repository
+        env:
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          WORK=$(mktemp -d)
+          git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/gammelby/homebrew-tap.git" "$WORK/repo" 2>/dev/null || {
+            # First-time: init a fresh repo
+            mkdir -p "$WORK/repo"
+            cd "$WORK/repo"
+            git init
+            git remote add origin "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/gammelby/homebrew-tap.git"
+          }
+          cd "$WORK/repo"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          mkdir -p Formula
+          cp -f "$GITHUB_WORKSPACE/tap/Formula/tmux-remote.rb" Formula/tmux-remote.rb
+          cp -f "$GITHUB_WORKSPACE/tap/README.md" README.md
+          git add Formula/tmux-remote.rb README.md
+          git commit -m "Update tmux-remote to ${GITHUB_REF_NAME}" || echo "No changes to commit"
+          git push origin HEAD:main

@@ -15,6 +15,9 @@ targets:
   TmuxRemote:
     type: application
     platform: iOS
+    configFiles:
+      Debug: Debug.xcconfig
+      Release: Release.xcconfig
     sources:
       - TmuxRemote
     dependencies:
@@ -28,6 +31,9 @@ targets:
   TmuxRemoteTests:
     type: bundle.unit-test
     platform: iOS
+    configFiles:
+      Debug: TestsDebug.xcconfig
+      Release: TestsRelease.xcconfig
     sources:
       - TmuxRemoteTests
     dependencies:

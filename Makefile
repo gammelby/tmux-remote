@@ -2,7 +2,8 @@
        configure configure-agent configure-client \
        init-test-server run-test-server setup-test-client \
        run-tests-offline run-tests-online run-test-client-suite \
-       test clean-test ios-setup help
+       test clean-test ios-setup ios-init ios-build ios-release \
+       ios-clean help
 
 PYTHON        ?= python3
 AGENT_BUILD   = agent/_build
@@ -13,6 +14,12 @@ TEST_DIR      = .test
 TEST_AGENT_HOME = $(TEST_DIR)/agent_home
 TEST_CLIENT_HOME = $(TEST_DIR)/client_home
 TEST_ENV      = $(TEST_DIR)/env
+IOS_DIR       = clients/ios
+IOS_WORKSPACE = $(IOS_DIR)/TmuxRemote.xcworkspace
+IOS_SCHEME    = TmuxRemote
+IOS_BUILD     = $(IOS_DIR)/_build
+IOS_ARCHIVE   = $(IOS_BUILD)/TmuxRemote.xcarchive
+IOS_EXPORT    = $(IOS_BUILD)/export
 
 # ── Build ──────────────────────────────────────────────────────────
 
@@ -162,7 +169,7 @@ run-test-client-suite: $(AGENT_BIN) $(CLIENT_BIN)
 		echo "To run online tests, start the server and run: make setup-test-client"; \
 	fi
 
-# ── iOS Setup ─────────────────────────────────────────────────────
+# ── iOS Setup / Build / Release ───────────────────────────────────
 
 ios-setup:
 	@if [ -z "$(TEAM)" ]; then \
@@ -172,6 +179,62 @@ ios-setup:
 	fi
 	@echo "DEVELOPMENT_TEAM = $(TEAM)" > clients/ios/DeveloperSettings.xcconfig
 	@echo "Set development team to $(TEAM) in clients/ios/DeveloperSettings.xcconfig"
+
+ios-init:
+	@command -v xcodegen >/dev/null 2>&1 || { echo "xcodegen not found. Install: brew install xcodegen"; exit 1; }
+	@command -v pod >/dev/null 2>&1 || { echo "CocoaPods not found. Install: brew install cocoapods"; exit 1; }
+	cd $(IOS_DIR) && xcodegen generate
+	cd $(IOS_DIR) && pod install
+	@echo ""
+	@echo "Workspace ready: $(IOS_WORKSPACE)"
+	@echo "Open in Xcode or run: make ios-build"
+
+ios-build:
+	@if [ ! -d "$(IOS_WORKSPACE)" ]; then \
+		echo "Workspace not found. Run: make ios-init"; \
+		exit 1; \
+	fi
+	xcodebuild build \
+		-workspace $(IOS_WORKSPACE) \
+		-scheme $(IOS_SCHEME) \
+		-configuration Debug \
+		-destination 'generic/platform=iOS Simulator'
+
+ios-release:
+	@if [ ! -d "$(IOS_WORKSPACE)" ]; then \
+		echo "Workspace not found. Run: make ios-init"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(IOS_DIR)/DeveloperSettings.xcconfig" ]; then \
+		echo "DeveloperSettings.xcconfig not found."; \
+		echo "Run: make ios-setup TEAM=YOUR_TEAM_ID"; \
+		exit 1; \
+	fi
+	@TEAM_ID=$$(grep DEVELOPMENT_TEAM $(IOS_DIR)/DeveloperSettings.xcconfig | sed 's/.*= *//' | tr -d ' ') && \
+	if [ -z "$$TEAM_ID" ] || [ "$$TEAM_ID" = "XXXXXXXXXX" ]; then \
+		echo "Invalid team ID in DeveloperSettings.xcconfig."; \
+		echo "Run: make ios-setup TEAM=YOUR_TEAM_ID"; \
+		exit 1; \
+	fi && \
+	mkdir -p $(IOS_BUILD) && \
+	printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n\t<key>method</key>\n\t<string>release-testing</string>\n\t<key>teamID</key>\n\t<string>%s</string>\n</dict>\n</plist>\n' "$$TEAM_ID" > $(IOS_BUILD)/ExportOptions.plist
+	xcodebuild archive \
+		-workspace $(IOS_WORKSPACE) \
+		-scheme $(IOS_SCHEME) \
+		-configuration Release \
+		-destination 'generic/platform=iOS' \
+		-archivePath $(IOS_ARCHIVE) \
+		-allowProvisioningUpdates
+	xcodebuild -exportArchive \
+		-archivePath $(IOS_ARCHIVE) \
+		-exportPath $(IOS_EXPORT) \
+		-exportOptionsPlist $(IOS_BUILD)/ExportOptions.plist \
+		-allowProvisioningUpdates
+	@echo ""
+	@echo "IPA exported to $(IOS_EXPORT)/"
+
+ios-clean:
+	rm -rf $(IOS_BUILD)
 
 # ── Help ───────────────────────────────────────────────────────────
 
@@ -202,6 +265,10 @@ help:
 	@echo ""
 	@echo "iOS:"
 	@echo "  make ios-setup TEAM=ID        Set Xcode development team (one-time)"
+	@echo "  make ios-init                 Generate project and install pods"
+	@echo "  make ios-build                Build iOS app (debug, simulator)"
+	@echo "  make ios-release              Archive and export IPA (release-testing)"
+	@echo "  make ios-clean                Remove iOS build artifacts"
 	@echo ""
 	@echo "Clean:"
 	@echo "  make clean                    Remove all build artifacts"
