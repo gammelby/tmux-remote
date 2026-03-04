@@ -20,6 +20,7 @@ struct DeviceListView: View {
     @State private var probeStatuses: [String: ProbeStatus] = [:]
     @State private var showSettings = false
     @State private var isRefreshing = false
+    @State private var editMode: EditMode = .inactive
 
     /// Tracks devices where we fell back to CoAP probing (old agent without control stream).
     private enum ProbeStatus {
@@ -40,6 +41,7 @@ struct DeviceListView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 HStack(spacing: 16) {
+                    EditButton()
                     Button {
                         showSettings = true
                     } label: {
@@ -121,6 +123,7 @@ struct DeviceListView: View {
             }
             .onDelete(perform: deleteDevices)
         }
+        .environment(\.editMode, $editMode)
         .refreshable {
             probeStatuses.removeAll()
             for device in bookmarkStore.devices {
