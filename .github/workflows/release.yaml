@@ -26,9 +26,9 @@ jobs:
           - runner: ubuntu-latest
             os: linux
             arch: amd64
-          # - runner: ubuntu-24.04-arm
-          #   os: linux
-          #   arch: arm64
+          - runner: ubuntu-24.04-arm
+            os: linux
+            arch: arm64
           - runner: macos-latest
             os: macos
             arch: arm64
