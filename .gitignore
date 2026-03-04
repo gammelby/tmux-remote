@@ -20,3 +20,10 @@ client*.txt
 device*.txt
 clients/ios/*xcodeproj
 clients/ios/build*
+
+# Android
+.gradle/
+*.apk
+local.properties
+
+README.html
