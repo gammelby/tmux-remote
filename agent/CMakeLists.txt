@@ -49,6 +49,7 @@ set(src
   src/tmuxremote_tmux.c
   src/tmuxremote_banner.c
   src/tmuxremote_keychain.c
+  src/tmuxremote_service.c
   ${prompt_src}
 )
 

@@ -4,6 +4,7 @@
 #include "tmuxremote_banner.h"
 #include "tmuxremote_device.h"
 #include "tmuxremote_keychain.h"
+#include "tmuxremote_service.h"
 
 #include <apps/common/device_config.h>
 #include <apps/common/logging.h>
@@ -46,7 +47,10 @@ enum {
     OPTION_MOVE_DEVICE_KEY,
     OPTION_BACKGROUND,
     OPTION_SILENT,
-    OPTION_LIST_USERS
+    OPTION_LIST_USERS,
+    OPTION_INSTALL_SERVICE,
+    OPTION_UNINSTALL_SERVICE,
+    OPTION_SERVICE_STATUS
 };
 
 static volatile sig_atomic_t signalCount = 0;
@@ -82,6 +86,9 @@ struct args {
     bool background;
     bool silent;
     bool listUsers;
+    bool installService;
+    bool uninstallService;
+    bool serviceStatus;
 };
 
 static void args_init(struct args* args);
@@ -228,6 +235,21 @@ int main(int argc, char** argv)
                 free(homeDir);
             }
         }
+    } else if (args.installService) {
+        char* homeDir = args.homeDir ? args.homeDir : get_default_home_dir();
+        if (homeDir == NULL) {
+            printf("Cannot determine home directory" NEWLINE);
+            status = false;
+        } else {
+            status = tmuxremote_do_install_service(homeDir);
+            if (homeDir != args.homeDir) {
+                free(homeDir);
+            }
+        }
+    } else if (args.uninstallService) {
+        status = tmuxremote_do_uninstall_service();
+    } else if (args.serviceStatus) {
+        status = tmuxremote_do_service_status();
     } else {
         char* homeDir = args.homeDir ? args.homeDir : get_default_home_dir();
         if (homeDir == NULL) {
@@ -472,6 +494,7 @@ bool run_agent(const struct args* args)
     /* Device event listener and signal handling.
        The SIGINT handler only sets flags; all SDK calls happen here. */
     signal(SIGINT, &signal_handler);
+    signal(SIGTERM, &signal_handler);
     struct device_event_state eventState;
     memset(&eventState, 0, sizeof(eventState));
     eventState.device = app.device;
@@ -486,7 +509,7 @@ bool run_agent(const struct args* args)
     }
 
     if (signalCount > 0) {
-        info_printf("\rCaught signal %d" NEWLINE, SIGINT);
+        info_printf("\rCaught shutdown signal" NEWLINE);
     }
 
     /* Shutdown */
@@ -581,6 +604,9 @@ bool parse_args(int argc, char** argv, struct args* args)
     const char x14s[] = "b"; const char* x14l[] = { "background", 0 };
     const char x15s[] = "s"; const char* x15l[] = { "silent", 0 };
     const char x16s[] = "";  const char* x16l[] = { "list-users", 0 };
+    const char x17s[] = "";  const char* x17l[] = { "install-service", 0 };
+    const char x18s[] = "";  const char* x18l[] = { "uninstall-service", 0 };
+    const char x19s[] = "";  const char* x19l[] = { "service-status", 0 };
 
     const struct { int k; int f; const char* s; const char* const* l; } opts[] = {
         { OPTION_HELP,        GOPT_NOARG, x1s,  x1l },
@@ -599,6 +625,9 @@ bool parse_args(int argc, char** argv, struct args* args)
         { OPTION_BACKGROUND,  GOPT_NOARG, x14s, x14l },
         { OPTION_SILENT,      GOPT_NOARG, x15s, x15l },
         { OPTION_LIST_USERS,  GOPT_NOARG, x16s, x16l },
+        { OPTION_INSTALL_SERVICE,   GOPT_NOARG, x17s, x17l },
+        { OPTION_UNINSTALL_SERVICE, GOPT_NOARG, x18s, x18l },
+        { OPTION_SERVICE_STATUS,    GOPT_NOARG, x19s, x19l },
         {0, 0, 0, 0}
     };
 
@@ -627,6 +656,15 @@ bool parse_args(int argc, char** argv, struct args* args)
     }
     if (gopt(options, OPTION_LIST_USERS)) {
         args->listUsers = true;
+    }
+    if (gopt(options, OPTION_INSTALL_SERVICE)) {
+        args->installService = true;
+    }
+    if (gopt(options, OPTION_UNINSTALL_SERVICE)) {
+        args->uninstallService = true;
+    }
+    if (gopt(options, OPTION_SERVICE_STATUS)) {
+        args->serviceStatus = true;
     }
 
     const char* tmp = NULL;
@@ -1019,4 +1057,9 @@ void print_help(void)
     printf("      --record-pty <path>   Record raw PTY data to file" NEWLINE);
     printf("  -b, --background          Run in background (daemon mode)" NEWLINE);
     printf("  -s, --silent              Suppress informational output (errors only)" NEWLINE);
+#ifdef __APPLE__
+    printf("      --install-service     Install macOS LaunchAgent (auto-start on login)" NEWLINE);
+    printf("      --uninstall-service   Uninstall macOS LaunchAgent" NEWLINE);
+    printf("      --service-status      Show LaunchAgent status" NEWLINE);
+#endif
 }
