@@ -39,7 +39,7 @@ bool tmuxremote_iam_load_state(struct tmuxremote_iam* niam);
 
 void tmuxremote_iam_create_default_state(NabtoDevice* device, struct nm_fs* file,
                                          const char* filename, struct nn_log* logger,
-                                         const char* username);
+                                         const char* username, const char* name);
 
 void tmuxremote_iam_create_open_state(NabtoDevice* device, struct nm_fs* file,
                                       const char* filename, struct nn_log* logger);

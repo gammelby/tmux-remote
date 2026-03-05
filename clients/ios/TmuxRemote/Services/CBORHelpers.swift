@@ -151,6 +151,32 @@ enum CBORHelpers {
         )
     }
 
+    struct AgentStatus {
+        let version: String
+        let friendlyName: String?
+    }
+
+    static func decodeStatus(from data: Data) -> AgentStatus? {
+        guard let decoded = try? CBOR.decode([UInt8](data)) else { return nil }
+        guard case .map(let map) = decoded else { return nil }
+
+        let version: String
+        if case .utf8String(let v) = map[.utf8String("version")] {
+            version = v
+        } else {
+            return nil
+        }
+
+        let friendlyName: String?
+        if case .utf8String(let n) = map[.utf8String("friendly_name")] {
+            friendlyName = n
+        } else {
+            friendlyName = nil
+        }
+
+        return AgentStatus(version: version, friendlyName: friendlyName)
+    }
+
     static func decodeSessions(from data: Data) -> [SessionInfo] {
         guard let decoded = try? CBOR.decode([UInt8](data)) else { return [] }
         guard case .array(let items) = decoded else { return [] }

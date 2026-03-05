@@ -46,7 +46,9 @@ enum {
     OPTION_MOVE_DEVICE_KEY,
     OPTION_BACKGROUND,
     OPTION_SILENT,
-    OPTION_LIST_USERS
+    OPTION_LIST_USERS,
+    OPTION_NAME,
+    OPTION_SET_NAME
 };
 
 static volatile sig_atomic_t signalCount = 0;
@@ -82,6 +84,8 @@ struct args {
     bool background;
     bool silent;
     bool listUsers;
+    char* name;
+    char* setName;
 };
 
 static void args_init(struct args* args);
@@ -178,7 +182,7 @@ int main(int argc, char** argv)
                 printf("--demo-init has been removed. Use --init (invite-only pairing)." NEWLINE);
                 status = false;
             } else {
-                status = tmuxremote_do_init(homeDir, args.productId, args.deviceId);
+                status = tmuxremote_do_init(homeDir, args.productId, args.deviceId, args.name);
             }
             if (homeDir != args.homeDir) {
                 free(homeDir);
@@ -213,6 +217,17 @@ int main(int argc, char** argv)
             status = false;
         } else {
             status = tmuxremote_do_list_users(homeDir);
+            if (homeDir != args.homeDir) {
+                free(homeDir);
+            }
+        }
+    } else if (args.setName != NULL) {
+        char* homeDir = args.homeDir ? args.homeDir : get_default_home_dir();
+        if (homeDir == NULL) {
+            printf("Cannot determine home directory" NEWLINE);
+            status = false;
+        } else {
+            status = tmuxremote_do_set_name(homeDir, args.setName);
             if (homeDir != args.homeDir) {
                 free(homeDir);
             }
@@ -561,6 +576,8 @@ void args_deinit(struct args* args)
     free(args->deviceId);
     free(args->recordPtyFile);
     free(args->moveDeviceKey);
+    free(args->name);
+    free(args->setName);
 }
 
 bool parse_args(int argc, char** argv, struct args* args)
@@ -581,6 +598,8 @@ bool parse_args(int argc, char** argv, struct args* args)
     const char x14s[] = "b"; const char* x14l[] = { "background", 0 };
     const char x15s[] = "s"; const char* x15l[] = { "silent", 0 };
     const char x16s[] = "";  const char* x16l[] = { "list-users", 0 };
+    const char x17s[] = "n"; const char* x17l[] = { "name", 0 };
+    const char x18s[] = "";  const char* x18l[] = { "set-name", 0 };
 
     const struct { int k; int f; const char* s; const char* const* l; } opts[] = {
         { OPTION_HELP,        GOPT_NOARG, x1s,  x1l },
@@ -599,6 +618,8 @@ bool parse_args(int argc, char** argv, struct args* args)
         { OPTION_BACKGROUND,  GOPT_NOARG, x14s, x14l },
         { OPTION_SILENT,      GOPT_NOARG, x15s, x15l },
         { OPTION_LIST_USERS,  GOPT_NOARG, x16s, x16l },
+        { OPTION_NAME,        GOPT_ARG,   x17s, x17l },
+        { OPTION_SET_NAME,    GOPT_ARG,   x18s, x18l },
         {0, 0, 0, 0}
     };
 
@@ -655,6 +676,12 @@ bool parse_args(int argc, char** argv, struct args* args)
     }
     if (gopt_arg(options, OPTION_MOVE_DEVICE_KEY, &tmp)) {
         args->moveDeviceKey = strdup(tmp);
+    }
+    if (gopt_arg(options, OPTION_NAME, &tmp)) {
+        args->name = strdup(tmp);
+    }
+    if (gopt_arg(options, OPTION_SET_NAME, &tmp)) {
+        args->setName = strdup(tmp);
     }
 
     gopt_free(options);
@@ -1006,6 +1033,8 @@ void print_help(void)
     printf("  -v, --version             Show version" NEWLINE);
     printf("  -H, --home-dir <dir>      Home directory (default: ~/.tmux-remote/)" NEWLINE);
     printf("      --init                Initialize configuration" NEWLINE);
+    printf("  -n, --name <name>         Set agent display name (used with --init)" NEWLINE);
+    printf("      --set-name <name>     Change agent display name (offline)" NEWLINE);
     printf("      --demo-init           Removed (invite-only pairing enforced)" NEWLINE);
     printf("      --add-user <name>     Create a pairing invitation for a new user" NEWLINE);
     printf("      --remove-user <name>  Revoke access for a user" NEWLINE);

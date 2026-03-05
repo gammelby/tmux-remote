@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 bool tmuxremote_do_init(const char* homeDir, const char* productId,
-                        const char* deviceId);
+                        const char* deviceId, const char* name);
 
 bool tmuxremote_do_demo_init(const char* homeDir, const char* productId,
                              const char* deviceId);
@@ -14,6 +14,8 @@ bool tmuxremote_do_add_user(const char* homeDir, const char* username);
 bool tmuxremote_do_remove_user(const char* homeDir, const char* username);
 
 bool tmuxremote_do_list_users(const char* homeDir);
+
+bool tmuxremote_do_set_name(const char* homeDir, const char* name);
 
 bool tmuxremote_do_move_device_key(const char* homeDir, const char* targetStorage);
 

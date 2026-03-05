@@ -21,6 +21,9 @@ struct DeviceListView: View {
     @State private var showSettings = false
     @State private var isRefreshing = false
     @State private var editMode: EditMode = .inactive
+    @State private var showRenameAlert = false
+    @State private var renameText = ""
+    @State private var renameDeviceId: String?
 
     /// Tracks devices where we fell back to CoAP probing (old agent without control stream).
     private enum ProbeStatus {
@@ -41,7 +44,13 @@ struct DeviceListView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 HStack(spacing: 16) {
-                    EditButton()
+                    Button {
+                        withAnimation {
+                            editMode = editMode == .active ? .inactive : .active
+                        }
+                    } label: {
+                        Image(systemName: editMode == .active ? "checkmark" : "pencil")
+                    }
                     Button {
                         showSettings = true
                     } label: {
@@ -107,6 +116,24 @@ struct DeviceListView: View {
                 newSessionDevice = nil
             }
         }
+        .alert("Rename Agent", isPresented: $showRenameAlert) {
+            TextField("Name", text: $renameText)
+            Button("Save") {
+                if let deviceId = renameDeviceId, !renameText.isEmpty {
+                    bookmarkStore.renameDevice(deviceId: deviceId, name: renameText)
+                }
+                renameDeviceId = nil
+            }
+            Button("Reset to Agent Name") {
+                if let deviceId = renameDeviceId {
+                    bookmarkStore.renameDevice(deviceId: deviceId, name: deviceId)
+                }
+                renameDeviceId = nil
+            }
+            Button("Cancel", role: .cancel) {
+                renameDeviceId = nil
+            }
+        }
         .task {
             if let lastId = bookmarkStore.lastDeviceId {
                 expandedDevices.insert(lastId)
@@ -150,6 +177,15 @@ struct DeviceListView: View {
         }
         .accessibilityIdentifier("device-row-\(device.deviceId)")
         .tint(.primary)
+        .contextMenu {
+            Button {
+                renameText = device.displayName
+                renameDeviceId = device.deviceId
+                showRenameAlert = true
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+        }
 
         if isExpanded {
             expandedContent(for: device)
@@ -164,7 +200,7 @@ struct DeviceListView: View {
                 .frame(width: 10, height: 10)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(device.name)
+                Text(device.displayName)
                     .font(.body)
                     .fontWeight(.medium)
 
@@ -351,6 +387,13 @@ struct DeviceListView: View {
             Task {
                 do {
                     let conn = try await connectionManager.connection(for: device)
+
+                    // Fetch agent friendly name (best-effort, fire-and-forget)
+                    Task {
+                        if let name = await connectionManager.fetchAgentFriendlyName(for: device.deviceId) {
+                            bookmarkStore.updateAgentName(deviceId: device.deviceId, agentName: name)
+                        }
+                    }
 
                     // If control stream hasn't delivered data within 3s, fall back to CoAP probe.
                     // This handles old agents without control stream support.

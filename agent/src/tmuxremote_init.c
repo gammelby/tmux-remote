@@ -64,7 +64,7 @@ static bool parse_key_storage_target(const char* targetStorage,
 }
 
 static bool init_common(const char* homeDir, const char* productId,
-                        const char* deviceId)
+                        const char* deviceId, const char* name)
 {
     struct nm_fs fsImpl = nm_fs_posix_get_impl();
     char buffer[512];
@@ -217,7 +217,7 @@ static bool init_common(const char* homeDir, const char* productId,
     nabto_device_get_device_fingerprint(device, &fingerprint);
 
     /* Create IAM state */
-    tmuxremote_iam_create_default_state(device, &fsImpl, iamStateFile, &logger, "owner");
+    tmuxremote_iam_create_default_state(device, &fsImpl, iamStateFile, &logger, "owner", name);
 
     /* Load state back to get pairing string for owner */
     char* str = NULL;
@@ -272,9 +272,9 @@ static bool init_common(const char* homeDir, const char* productId,
 }
 
 bool tmuxremote_do_init(const char* homeDir, const char* productId,
-                        const char* deviceId)
+                        const char* deviceId, const char* name)
 {
-    return init_common(homeDir, productId, deviceId);
+    return init_common(homeDir, productId, deviceId, name);
 }
 
 bool tmuxremote_do_demo_init(const char* homeDir, const char* productId,
@@ -592,6 +592,65 @@ bool tmuxremote_do_list_users(const char* homeDir)
     device_config_deinit(&dc);
     free(iamStateFile);
     free(deviceConfigFile);
+    return true;
+}
+
+bool tmuxremote_do_set_name(const char* homeDir, const char* name)
+{
+    struct nm_fs fsImpl = nm_fs_posix_get_impl();
+    char buffer[512];
+
+    snprintf(buffer, sizeof(buffer), "%s/state/iam_state.json", homeDir);
+    char* iamStateFile = strdup(buffer);
+
+    struct nn_log logger;
+    memset(&logger, 0, sizeof(logger));
+
+    /* Load IAM state */
+    char* str = NULL;
+    if (!string_file_load(&fsImpl, iamStateFile, &str)) {
+        printf("IAM state not found. Run --init first." NEWLINE);
+        free(iamStateFile);
+        return false;
+    }
+
+    struct nm_iam_state* state = nm_iam_state_new();
+    if (!nm_iam_serializer_state_load_json(state, str, &logger)) {
+        printf("Failed to parse IAM state." NEWLINE);
+        nm_iam_state_free(state);
+        free(str);
+        free(iamStateFile);
+        return false;
+    }
+    free(str);
+
+    nm_iam_state_set_friendly_name(state, name);
+
+    /* Save state */
+    char* jsonStr = NULL;
+    if (!nm_iam_serializer_state_dump_json(state, &jsonStr)) {
+        printf("Failed to serialize IAM state." NEWLINE);
+        nm_iam_state_free(state);
+        free(iamStateFile);
+        return false;
+    }
+
+    enum nm_fs_error ec = fsImpl.write_file(fsImpl.impl, iamStateFile,
+                                            (uint8_t*)jsonStr, strlen(jsonStr));
+    nm_iam_serializer_string_free(jsonStr);
+
+    if (ec != NM_FS_OK) {
+        printf("Failed to save IAM state." NEWLINE);
+        nm_iam_state_free(state);
+        free(iamStateFile);
+        return false;
+    }
+
+    printf("Agent name set to '%s'." NEWLINE, name);
+    printf("Restart the agent for the change to take effect." NEWLINE);
+
+    nm_iam_state_free(state);
+    free(iamStateFile);
     return true;
 }
 

@@ -207,14 +207,14 @@ static void check_and_announce_new_pairings(struct tmuxremote_iam* niam,
 
 void tmuxremote_iam_create_default_state(NabtoDevice* device, struct nm_fs* file,
                                          const char* filename, struct nn_log* logger,
-                                         const char* username)
+                                         const char* username, const char* name)
 {
     struct nm_iam_state* state = nm_iam_state_new();
     nm_iam_state_set_password_invite_pairing(state, true);
     nm_iam_state_set_local_open_pairing(state, false);
     nm_iam_state_set_password_open_pairing(state, false);
     nm_iam_state_set_local_initial_pairing(state, false);
-    nm_iam_state_set_friendly_name(state, "tmux-remote");
+    nm_iam_state_set_friendly_name(state, name != NULL ? name : "tmux-remote");
 
     /* Create the initial user with invite pairing credentials */
     struct nm_iam_user* user = nm_iam_state_user_new(username);

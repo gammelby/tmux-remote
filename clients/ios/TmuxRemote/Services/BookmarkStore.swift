@@ -71,6 +71,18 @@ class BookmarkStore {
         save()
     }
 
+    func updateAgentName(deviceId: String, agentName: String) {
+        guard let index = devices.firstIndex(where: { $0.deviceId == deviceId }) else { return }
+        devices[index].agentName = agentName
+        save()
+    }
+
+    func renameDevice(deviceId: String, name: String) {
+        guard let index = devices.firstIndex(where: { $0.deviceId == deviceId }) else { return }
+        devices[index].name = name
+        save()
+    }
+
     func bookmark(for deviceId: String) -> DeviceBookmark? {
         devices.first { $0.deviceId == deviceId }
     }

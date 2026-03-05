@@ -437,6 +437,19 @@ class ConnectionManager {
         }
     }
 
+    /// Fetch the agent's friendly name via GET /terminal/status (best-effort).
+    func fetchAgentFriendlyName(for deviceId: String) async -> String? {
+        guard let conn = connections[deviceId] else { return nil }
+        do {
+            let coap = try conn.createCoapRequest(method: "GET", path: "/terminal/status")
+            let response = try await executeCoap(coap: coap, timeoutNanoseconds: 5_000_000_000)
+            guard response.status == 205, let payload = response.payload else { return nil }
+            return CBORHelpers.decodeStatus(from: payload)?.friendlyName
+        } catch {
+            return nil
+        }
+    }
+
     /// CoAP-based session list (fallback for old agents without control stream).
     func listSessionsCoAP(on conn: Connection, timeoutNanoseconds: UInt64) async throws -> [SessionInfo] {
         return try await listSessions(on: conn, timeoutNanoseconds: timeoutNanoseconds)
