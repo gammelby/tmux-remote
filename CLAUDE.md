@@ -17,19 +17,18 @@ The repo contains three components that share no source code:
 ### Agent
 
 ```bash
-cd agent
-cmake -B _build -G Ninja
-cmake --build _build
+cd agent && make
+# or manually: cmake -B _build/$(uname -m)-$(uname -s | tr '[:upper:]' '[:lower:]') -G Ninja && cmake --build _build/...
 ```
 
 The Nabto Embedded SDK is fetched automatically via CMake FetchContent. No submodule init needed.
 
+Build artifacts go in `_build/<arch>-<os>/` (e.g. `_build/arm64-darwin/`, `_build/x86_64-linux/`) so host and devcontainer builds coexist.
+
 ### CLI client
 
 ```bash
-cd clients/cli
-cmake -B _build -G Ninja
-cmake --build _build
+cd clients/cli && make
 ```
 
 The Nabto Client SDK is fetched automatically via CMake FetchContent. No external downloads needed.

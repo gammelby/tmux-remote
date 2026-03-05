@@ -5,9 +5,11 @@
        test clean-test ios-setup ios-init ios-build ios-release \
        ios-clean help
 
+BUILD_TRIPLET := $(shell uname -m)-$(shell uname -s | tr '[:upper:]' '[:lower:]')
+
 PYTHON        ?= python3
-AGENT_BUILD   = agent/_build
-CLIENT_BUILD  = clients/cli/_build
+AGENT_BUILD   = agent/_build/$(BUILD_TRIPLET)
+CLIENT_BUILD  = clients/cli/_build/$(BUILD_TRIPLET)
 AGENT_BIN     = $(AGENT_BUILD)/tmux-remote-agent
 CLIENT_BIN    = $(CLIENT_BUILD)/tmux-remote
 TEST_DIR      = .test
@@ -26,20 +28,20 @@ IOS_EXPORT    = $(IOS_BUILD)/export
 all: agent client
 
 agent:
-	cd agent && cmake -B _build -G Ninja
+	cd agent && cmake -B _build/$(BUILD_TRIPLET) -G Ninja
 	cmake --build $(AGENT_BUILD)
 
 client:
-	cd clients/cli && cmake -B _build -G Ninja
+	cd clients/cli && cmake -B _build/$(BUILD_TRIPLET) -G Ninja
 	cmake --build $(CLIENT_BUILD)
 
 configure: configure-agent configure-client
 
 configure-agent:
-	cd agent && cmake -B _build -G Ninja
+	cd agent && cmake -B _build/$(BUILD_TRIPLET) -G Ninja
 
 configure-client:
-	cd clients/cli && cmake -B _build -G Ninja
+	cd clients/cli && cmake -B _build/$(BUILD_TRIPLET) -G Ninja
 
 # ── Clean ──────────────────────────────────────────────────────────
 
@@ -106,7 +108,7 @@ setup-test-client: $(CLIENT_BIN)
 		echo "Re-run: make clean-test && make init-test-server ..."; \
 		exit 1; \
 	fi && \
-	CLIENT_ABS=$$(cd clients/cli && pwd)/_build/tmux-remote && \
+	CLIENT_ABS=$$(cd clients/cli && pwd)/_build/$(BUILD_TRIPLET)/tmux-remote && \
 	mkdir -p $(TEST_CLIENT_HOME) && \
 	echo "Pairing client with test server..." && \
 	TMUX_REMOTE_HOME=$(TEST_CLIENT_HOME) $$CLIENT_ABS pair $$PAIRING_STRING --name default && \
@@ -118,8 +120,8 @@ setup-test-client: $(CLIENT_BIN)
 
 define generate_test_config
 	@. $(TEST_ENV) && \
-	AGENT_ABS=$$(cd agent && pwd)/_build/tmux-remote-agent && \
-	CLIENT_ABS=$$(cd clients/cli && pwd)/_build/tmux-remote && \
+	AGENT_ABS=$$(cd agent && pwd)/_build/$(BUILD_TRIPLET)/tmux-remote-agent && \
+	CLIENT_ABS=$$(cd clients/cli && pwd)/_build/$(BUILD_TRIPLET)/tmux-remote && \
 	HOME_ABS=$$(pwd)/$(TEST_AGENT_HOME) && \
 	CLIENT_HOME_ABS=$$(pwd)/$(TEST_CLIENT_HOME) && \
 	printf '{\n  "product_id": "%s",\n  "device_id": "%s",\n  "agent_binary": "%s",\n  "cli_binary": "%s",\n  "agent_home_dir": "%s",\n  "client_home_dir": "%s"\n}\n' \
@@ -284,3 +286,5 @@ help:
 	@echo "  make run-tests-offline        Run offline tests (no server needed)"
 	@echo "  make run-tests-online         Run online tests (needs server + paired client)"
 	@echo "  make run-test-client-suite    Run both test suites sequentially"
+	@echo ""
+	@echo "Build triplet: $(BUILD_TRIPLET)"
