@@ -5,7 +5,9 @@
        test clean-test ios-setup ios-init ios-build ios-release \
        ios-clean help
 
-BUILD_TRIPLET := $(shell uname -m)-$(shell uname -s | tr '[:upper:]' '[:lower:]')
+BUILD_ARCH    := $(shell uname -m | sed -e 's/aarch64/arm64/' -e 's/x86_64/x64/')
+BUILD_OS      := $(shell uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/osx/')
+BUILD_TRIPLET := $(BUILD_ARCH)-$(BUILD_OS)
 
 PYTHON        ?= python3
 AGENT_BUILD   = agent/_build/$(BUILD_TRIPLET)

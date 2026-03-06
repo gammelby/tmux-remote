@@ -26,12 +26,15 @@ jobs:
           - runner: ubuntu-latest
             os: linux
             arch: amd64
+            triplet: x64-linux
           - runner: ubuntu-24.04-arm
             os: linux
             arch: arm64
+            triplet: arm64-linux
           - runner: macos-latest
             os: macos
             arch: arm64
+            triplet: arm64-osx
 
     runs-on: ${{ matrix.runner }}
     name: Build ${{ matrix.os }}-${{ matrix.arch }}
@@ -52,16 +55,10 @@ jobs:
           brew install cmake ninja pcre2
 
       - name: Build agent
-        run: |
-          cd agent
-          cmake -B _build -G Ninja -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
-          cmake --build _build
+        run: make -C agent CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}"
 
       - name: Build CLI client
-        run: |
-          cd clients/cli
-          cmake -B _build -G Ninja -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
-          cmake --build _build
+        run: make -C clients/cli CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}"
 
       - name: Package release archive
         run: |
@@ -69,12 +66,13 @@ jobs:
           ARCHIVE_NAME="tmux-remote-${TAG}-${{ matrix.os }}-${{ matrix.arch }}"
           mkdir -p "${ARCHIVE_NAME}"
 
-          cp agent/_build/tmux-remote-agent "${ARCHIVE_NAME}/"
-          cp clients/cli/_build/tmux-remote "${ARCHIVE_NAME}/"
+          TRIPLET="${{ matrix.triplet }}"
+          cp "agent/_build/${TRIPLET}/tmux-remote-agent" "${ARCHIVE_NAME}/"
+          cp "clients/cli/_build/${TRIPLET}/tmux-remote" "${ARCHIVE_NAME}/"
           cp README.md "${ARCHIVE_NAME}/"
 
           # Bundle the Nabto Client SDK shared library
-          SDK_DIR="clients/cli/_build/_deps/nabto_client_sdk-src/lib"
+          SDK_DIR="clients/cli/_build/${TRIPLET}/_deps/nabto_client_sdk-src/lib"
           if [ "${{ matrix.os }}" = "macos" ]; then
             cp "${SDK_DIR}/macos-universal/libnabto_client.dylib" "${ARCHIVE_NAME}/"
           elif [ "${{ matrix.arch }}" = "arm64" ]; then

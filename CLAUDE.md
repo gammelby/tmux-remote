@@ -23,7 +23,7 @@ cd agent && make
 
 The Nabto Embedded SDK is fetched automatically via CMake FetchContent. No submodule init needed.
 
-Build artifacts go in `_build/<arch>-<os>/` (e.g. `_build/arm64-darwin/`, `_build/x86_64-linux/`) so host and devcontainer builds coexist.
+Build artifacts go in `_build/<arch>-<os>/` using vcpkg triplet names (e.g. `_build/arm64-osx/`, `_build/x64-linux/`) so host and devcontainer builds coexist.
 
 ### CLI client
 
