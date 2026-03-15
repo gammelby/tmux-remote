@@ -1,4 +1,4 @@
-#include "tmuxremote_prompt_rules.h"
+#include "pe_prompt_rules.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -7,7 +7,7 @@
 
 #define NEWLINE "\n"
 
-static void free_rule(tmuxremote_compiled_prompt_rule* rule)
+static void free_rule(pe_compiled_prompt_rule* rule)
 {
     if (rule == NULL) {
         return;
@@ -39,7 +39,7 @@ static void free_rule(tmuxremote_compiled_prompt_rule* rule)
     rule->max_scan_lines = 0;
 }
 
-void tmuxremote_prompt_candidate_free(tmuxremote_prompt_candidate* candidate)
+void pe_prompt_candidate_free(pe_prompt_candidate* candidate)
 {
     if (candidate == NULL) {
         return;
@@ -60,12 +60,12 @@ void tmuxremote_prompt_candidate_free(tmuxremote_prompt_candidate* candidate)
     candidate->anchor_row = 0;
 }
 
-void tmuxremote_prompt_ruleset_init(tmuxremote_prompt_ruleset* ruleset)
+void pe_prompt_ruleset_init(pe_prompt_ruleset* ruleset)
 {
     memset(ruleset, 0, sizeof(*ruleset));
 }
 
-void tmuxremote_prompt_ruleset_free(tmuxremote_prompt_ruleset* ruleset)
+void pe_prompt_ruleset_free(pe_prompt_ruleset* ruleset)
 {
     if (ruleset == NULL) {
         return;
@@ -102,15 +102,15 @@ static pcre2_code* compile_regex(const char* pattern)
     return compiled;
 }
 
-static bool copy_static_actions(tmuxremote_compiled_prompt_rule* dst,
-                                const tmuxremote_pattern_definition* src)
+static bool copy_static_actions(pe_compiled_prompt_rule* dst,
+                                const pe_pattern_definition* src)
 {
     if (src->action_count <= 0) {
         return true;
     }
 
     dst->static_actions = calloc((size_t)src->action_count,
-                                 sizeof(tmuxremote_prompt_action));
+                                 sizeof(pe_prompt_action));
     if (dst->static_actions == NULL) {
         return false;
     }
@@ -128,22 +128,22 @@ static bool copy_static_actions(tmuxremote_compiled_prompt_rule* dst,
     return true;
 }
 
-bool tmuxremote_prompt_ruleset_load(tmuxremote_prompt_ruleset* ruleset,
-                                    const tmuxremote_pattern_definition* definitions,
-                                    int definition_count)
+bool pe_prompt_ruleset_load(pe_prompt_ruleset* ruleset,
+                             const pe_pattern_definition* definitions,
+                             int definition_count)
 {
     if (ruleset == NULL) {
         return false;
     }
 
-    tmuxremote_prompt_ruleset_free(ruleset);
+    pe_prompt_ruleset_free(ruleset);
 
     if (definitions == NULL || definition_count <= 0) {
         return true;
     }
 
     ruleset->rules = calloc((size_t)definition_count,
-                            sizeof(tmuxremote_compiled_prompt_rule));
+                            sizeof(pe_compiled_prompt_rule));
     if (ruleset->rules == NULL) {
         return false;
     }
@@ -151,8 +151,8 @@ bool tmuxremote_prompt_ruleset_load(tmuxremote_prompt_ruleset* ruleset,
     int valid = 0;
 
     for (int i = 0; i < definition_count; i++) {
-        const tmuxremote_pattern_definition* def = &definitions[i];
-        tmuxremote_compiled_prompt_rule rule;
+        const pe_pattern_definition* def = &definitions[i];
+        pe_compiled_prompt_rule rule;
         memset(&rule, 0, sizeof(rule));
 
         if (def->id == NULL || def->prompt_regex == NULL) {
@@ -280,11 +280,11 @@ static char* replace_number_token(const char* template_keys, const char* number)
     return out;
 }
 
-static bool append_action(tmuxremote_prompt_candidate* candidate,
+static bool append_action(pe_prompt_candidate* candidate,
                           const char* label,
                           const char* keys)
 {
-    if (candidate->action_count >= TMUXREMOTE_PROMPT_MAX_ACTIONS) {
+    if (candidate->action_count >= PE_PROMPT_MAX_ACTIONS) {
         return false;
     }
 
@@ -351,10 +351,10 @@ static const char* find_numbered_option_start(const char* line)
     return NULL;
 }
 
-static bool extract_numbered_menu_actions(const tmuxremote_compiled_prompt_rule* rule,
-                                          const tmuxremote_terminal_snapshot* snapshot,
+static bool extract_numbered_menu_actions(const pe_compiled_prompt_rule* rule,
+                                          const pe_terminal_snapshot* snapshot,
                                           int prompt_row,
-                                          tmuxremote_prompt_candidate* candidate)
+                                          pe_prompt_candidate* candidate)
 {
     if (rule->action_template_keys == NULL) {
         return false;
@@ -385,7 +385,7 @@ static bool extract_numbered_menu_actions(const tmuxremote_compiled_prompt_rule*
         return false;
     }
 
-    bool seen_numbers[TMUXREMOTE_PROMPT_MAX_ACTIONS + 1];
+    bool seen_numbers[PE_PROMPT_MAX_ACTIONS + 1];
     memset(seen_numbers, 0, sizeof(seen_numbers));
 
     for (int row = prompt_row + 1; row <= max_row; row++) {
@@ -433,7 +433,7 @@ static bool extract_numbered_menu_actions(const tmuxremote_compiled_prompt_rule*
         long option_number = strtol(number, &end, 10);
         if (end == number ||
             option_number <= 0 ||
-            option_number > TMUXREMOTE_PROMPT_MAX_ACTIONS) {
+            option_number > PE_PROMPT_MAX_ACTIONS) {
             free(number);
             free(label);
             continue;
@@ -482,10 +482,10 @@ static bool extract_numbered_menu_actions(const tmuxremote_compiled_prompt_rule*
     return true;
 }
 
-static bool fill_candidate_from_rule(const tmuxremote_compiled_prompt_rule* rule,
-                                     const tmuxremote_terminal_snapshot* snapshot,
+static bool fill_candidate_from_rule(const pe_compiled_prompt_rule* rule,
+                                     const pe_terminal_snapshot* snapshot,
                                      int prompt_row,
-                                     tmuxremote_prompt_candidate* candidate)
+                                     pe_prompt_candidate* candidate)
 {
     memset(candidate, 0, sizeof(*candidate));
 
@@ -495,13 +495,13 @@ static bool fill_candidate_from_rule(const tmuxremote_compiled_prompt_rule* rule
     candidate->anchor_row = prompt_row;
 
     if (candidate->pattern_id == NULL || candidate->prompt == NULL) {
-        tmuxremote_prompt_candidate_free(candidate);
+        pe_prompt_candidate_free(candidate);
         return false;
     }
 
-    if (rule->pattern_type == TMUXREMOTE_PROMPT_TYPE_NUMBERED_MENU) {
+    if (rule->pattern_type == PE_PROMPT_TYPE_NUMBERED_MENU) {
         if (!extract_numbered_menu_actions(rule, snapshot, prompt_row, candidate)) {
-            tmuxremote_prompt_candidate_free(candidate);
+            pe_prompt_candidate_free(candidate);
             return false;
         }
         return true;
@@ -511,21 +511,21 @@ static bool fill_candidate_from_rule(const tmuxremote_compiled_prompt_rule* rule
         if (!append_action(candidate,
                            rule->static_actions[i].label,
                            rule->static_actions[i].keys)) {
-            tmuxremote_prompt_candidate_free(candidate);
+            pe_prompt_candidate_free(candidate);
             return false;
         }
     }
 
     if (candidate->action_count <= 0) {
-        tmuxremote_prompt_candidate_free(candidate);
+        pe_prompt_candidate_free(candidate);
         return false;
     }
 
     return true;
 }
 
-static bool is_cursor_relevant_for_prompt(const tmuxremote_compiled_prompt_rule* rule,
-                                          const tmuxremote_terminal_snapshot* snapshot,
+static bool is_cursor_relevant_for_prompt(const pe_compiled_prompt_rule* rule,
+                                          const pe_terminal_snapshot* snapshot,
                                           int prompt_row)
 {
     if (rule == NULL || snapshot == NULL) {
@@ -542,9 +542,9 @@ static bool is_cursor_relevant_for_prompt(const tmuxremote_compiled_prompt_rule*
     return snapshot->cursor_row <= max_relevant_row;
 }
 
-bool tmuxremote_prompt_ruleset_match(const tmuxremote_prompt_ruleset* ruleset,
-                                     const tmuxremote_terminal_snapshot* snapshot,
-                                     tmuxremote_prompt_candidate* out_candidate)
+bool pe_prompt_ruleset_match(const pe_prompt_ruleset* ruleset,
+                              const pe_terminal_snapshot* snapshot,
+                              pe_prompt_candidate* out_candidate)
 {
     if (out_candidate == NULL) {
         return false;
@@ -557,7 +557,7 @@ bool tmuxremote_prompt_ruleset_match(const tmuxremote_prompt_ruleset* ruleset,
     }
 
     for (int r = 0; r < ruleset->count; r++) {
-        const tmuxremote_compiled_prompt_rule* rule = &ruleset->rules[r];
+        const pe_compiled_prompt_rule* rule = &ruleset->rules[r];
 
         for (int row = snapshot->rows - 1; row >= 0; row--) {
             const char* line = snapshot->lines[row];
@@ -582,14 +582,14 @@ bool tmuxremote_prompt_ruleset_match(const tmuxremote_prompt_ruleset* ruleset,
     return false;
 }
 
-bool tmuxremote_prompt_candidate_to_instance(const tmuxremote_prompt_candidate* candidate,
-                                             tmuxremote_prompt_instance* instance)
+bool pe_prompt_candidate_to_instance(const pe_prompt_candidate* candidate,
+                                      pe_prompt_instance* instance)
 {
     if (candidate == NULL || instance == NULL) {
         return false;
     }
 
-    tmuxremote_prompt_instance_free(instance);
+    pe_prompt_instance_free(instance);
 
     instance->pattern_id = candidate->pattern_id ? strdup(candidate->pattern_id) : NULL;
     instance->prompt = candidate->prompt ? strdup(candidate->prompt) : NULL;
@@ -597,7 +597,7 @@ bool tmuxremote_prompt_candidate_to_instance(const tmuxremote_prompt_candidate* 
     instance->anchor_row = candidate->anchor_row;
 
     if (instance->pattern_id == NULL || instance->prompt == NULL) {
-        tmuxremote_prompt_instance_free(instance);
+        pe_prompt_instance_free(instance);
         return false;
     }
 
@@ -606,7 +606,7 @@ bool tmuxremote_prompt_candidate_to_instance(const tmuxremote_prompt_candidate* 
         instance->actions[i].keys = candidate->actions[i].keys ? strdup(candidate->actions[i].keys) : NULL;
 
         if (instance->actions[i].label == NULL || instance->actions[i].keys == NULL) {
-            tmuxremote_prompt_instance_free(instance);
+            pe_prompt_instance_free(instance);
             return false;
         }
     }

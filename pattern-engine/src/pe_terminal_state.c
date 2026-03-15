@@ -1,4 +1,4 @@
-#include "tmuxremote_terminal_state.h"
+#include "pe_terminal_state.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -8,22 +8,22 @@
 #define TERMINAL_DEFAULT_ROWS 48
 #define TERMINAL_DEFAULT_COLS 160
 
-static void clear_screen(tmuxremote_terminal_state* state);
-static void clear_line_range(tmuxremote_terminal_state* state,
+static void clear_screen(pe_terminal_state* state);
+static void clear_line_range(pe_terminal_state* state,
                              int row,
                              int col_start,
                              int col_end);
-static void scroll_up(tmuxremote_terminal_state* state);
+static void scroll_up(pe_terminal_state* state);
 static int clamp_int(int value, int minimum, int maximum);
-static void put_char(tmuxremote_terminal_state* state, unsigned char ch);
-static void advance_line(tmuxremote_terminal_state* state);
-static void process_csi(tmuxremote_terminal_state* state,
+static void put_char(pe_terminal_state* state, unsigned char ch);
+static void advance_line(pe_terminal_state* state);
+static void process_csi(pe_terminal_state* state,
                         const char* params,
                         char final);
 static int get_param(const char* params, int index, int default_value);
 static bool has_private_mode(const char* params, int mode);
 
-static void init_cells(tmuxremote_terminal_state* state)
+static void init_cells(pe_terminal_state* state)
 {
     size_t count = (size_t)state->rows * (size_t)state->cols;
     state->cells = malloc(count);
@@ -32,9 +32,9 @@ static void init_cells(tmuxremote_terminal_state* state)
     }
 }
 
-void tmuxremote_terminal_state_init(tmuxremote_terminal_state* state,
-                                    int rows,
-                                    int cols)
+void pe_terminal_state_init(pe_terminal_state* state,
+                             int rows,
+                             int cols)
 {
     memset(state, 0, sizeof(*state));
 
@@ -49,7 +49,7 @@ void tmuxremote_terminal_state_init(tmuxremote_terminal_state* state,
     init_cells(state);
 }
 
-void tmuxremote_terminal_state_free(tmuxremote_terminal_state* state)
+void pe_terminal_state_free(pe_terminal_state* state)
 {
     if (state == NULL) {
         return;
@@ -58,7 +58,7 @@ void tmuxremote_terminal_state_free(tmuxremote_terminal_state* state)
     state->cells = NULL;
 }
 
-static char* cell_ptr(const tmuxremote_terminal_state* state, int row, int col)
+static char* cell_ptr(const pe_terminal_state* state, int row, int col)
 {
     return state->cells + ((size_t)row * (size_t)state->cols + (size_t)col);
 }
@@ -74,9 +74,9 @@ static int clamp_int(int value, int minimum, int maximum)
     return value;
 }
 
-void tmuxremote_terminal_state_resize(tmuxremote_terminal_state* state,
-                                      int rows,
-                                      int cols)
+void pe_terminal_state_resize(pe_terminal_state* state,
+                               int rows,
+                               int cols)
 {
     if (state == NULL) {
         return;
@@ -117,7 +117,7 @@ void tmuxremote_terminal_state_resize(tmuxremote_terminal_state* state,
     state->sequence++;
 }
 
-static void clear_screen(tmuxremote_terminal_state* state)
+static void clear_screen(pe_terminal_state* state)
 {
     if (state->cells == NULL) {
         return;
@@ -125,7 +125,7 @@ static void clear_screen(tmuxremote_terminal_state* state)
     memset(state->cells, ' ', (size_t)state->rows * (size_t)state->cols);
 }
 
-static void clear_line_range(tmuxremote_terminal_state* state,
+static void clear_line_range(pe_terminal_state* state,
                              int row,
                              int col_start,
                              int col_end)
@@ -145,7 +145,7 @@ static void clear_line_range(tmuxremote_terminal_state* state,
            (size_t)(col_end - col_start + 1));
 }
 
-static void scroll_up(tmuxremote_terminal_state* state)
+static void scroll_up(pe_terminal_state* state)
 {
     if (state->cells == NULL || state->rows <= 1) {
         return;
@@ -160,7 +160,7 @@ static void scroll_up(tmuxremote_terminal_state* state)
            row_bytes);
 }
 
-static void advance_line(tmuxremote_terminal_state* state)
+static void advance_line(pe_terminal_state* state)
 {
     state->cursor_col = 0;
     state->cursor_row++;
@@ -170,7 +170,7 @@ static void advance_line(tmuxremote_terminal_state* state)
     }
 }
 
-static void put_char(tmuxremote_terminal_state* state, unsigned char ch)
+static void put_char(pe_terminal_state* state, unsigned char ch)
 {
     if (state->cells == NULL) {
         return;
@@ -277,7 +277,7 @@ static bool has_private_mode(const char* params, int mode)
     return false;
 }
 
-static void process_csi(tmuxremote_terminal_state* state,
+static void process_csi(pe_terminal_state* state,
                         const char* params,
                         char final)
 {
@@ -395,9 +395,9 @@ static void process_csi(tmuxremote_terminal_state* state,
     }
 }
 
-void tmuxremote_terminal_state_feed(tmuxremote_terminal_state* state,
-                                    const uint8_t* data,
-                                    size_t len)
+void pe_terminal_state_feed(pe_terminal_state* state,
+                             const uint8_t* data,
+                             size_t len)
 {
     if (state == NULL || data == NULL || len == 0 || state->cells == NULL) {
         return;
@@ -475,7 +475,7 @@ void tmuxremote_terminal_state_feed(tmuxremote_terminal_state* state,
     state->sequence++;
 }
 
-static char* trim_row_copy(const tmuxremote_terminal_state* state, int row)
+static char* trim_row_copy(const pe_terminal_state* state, int row)
 {
     int last_non_space = -1;
     for (int col = 0; col < state->cols; col++) {
@@ -499,8 +499,8 @@ static char* trim_row_copy(const tmuxremote_terminal_state* state, int row)
     return line;
 }
 
-bool tmuxremote_terminal_state_snapshot(const tmuxremote_terminal_state* state,
-                                        tmuxremote_terminal_snapshot* snapshot)
+bool pe_terminal_state_snapshot(const pe_terminal_state* state,
+                                pe_terminal_snapshot* snapshot)
 {
     if (state == NULL || snapshot == NULL || state->cells == NULL) {
         return false;
@@ -523,7 +523,7 @@ bool tmuxremote_terminal_state_snapshot(const tmuxremote_terminal_state* state,
     for (int row = 0; row < snapshot->rows; row++) {
         snapshot->lines[row] = trim_row_copy(state, row);
         if (snapshot->lines[row] == NULL) {
-            tmuxremote_terminal_snapshot_free(snapshot);
+            pe_terminal_snapshot_free(snapshot);
             return false;
         }
     }
@@ -531,7 +531,7 @@ bool tmuxremote_terminal_state_snapshot(const tmuxremote_terminal_state* state,
     return true;
 }
 
-void tmuxremote_terminal_snapshot_free(tmuxremote_terminal_snapshot* snapshot)
+void pe_terminal_snapshot_free(pe_terminal_snapshot* snapshot)
 {
     if (snapshot == NULL) {
         return;

@@ -13,7 +13,7 @@ void tmuxremote_deinit(struct tmuxremote* app)
 {
     tmuxremote_session_map_deinit(&app->sessionMap);
     if (app->patternConfig) {
-        tmuxremote_pattern_config_free(app->patternConfig);
+        pe_pattern_config_free(app->patternConfig);
         app->patternConfig = NULL;
     }
     free(app->homeDir);

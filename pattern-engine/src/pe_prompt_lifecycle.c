@@ -1,4 +1,4 @@
-#include "tmuxremote_prompt_lifecycle.h"
+#include "pe_prompt_lifecycle.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -18,8 +18,8 @@ static uint64_t fnv1a64(const void* data, size_t len, uint64_t seed)
     return hash;
 }
 
-static void build_instance_id(const tmuxremote_prompt_candidate* candidate,
-                              char out_id[TMUXREMOTE_PROMPT_INSTANCE_ID_MAX])
+static void build_instance_id(const pe_prompt_candidate* candidate,
+                              char out_id[PE_PROMPT_INSTANCE_ID_MAX])
 {
     uint64_t hash = 1469598103934665603ULL;
 
@@ -48,12 +48,12 @@ static void build_instance_id(const tmuxremote_prompt_candidate* candidate,
 
     hash = fnv1a64(&candidate->anchor_row, sizeof(candidate->anchor_row), hash);
 
-    snprintf(out_id, TMUXREMOTE_PROMPT_INSTANCE_ID_MAX, "%016" PRIx64, hash);
+    snprintf(out_id, PE_PROMPT_INSTANCE_ID_MAX, "%016" PRIx64, hash);
 }
 
-static void emit_event(tmuxremote_prompt_lifecycle* lifecycle,
-                       tmuxremote_prompt_event_type type,
-                       const tmuxremote_prompt_instance* instance,
+static void emit_event(pe_prompt_lifecycle* lifecycle,
+                       pe_prompt_event_type type,
+                       const pe_prompt_instance* instance,
                        const char* instance_id)
 {
     if (lifecycle->callback != NULL) {
@@ -64,21 +64,21 @@ static void emit_event(tmuxremote_prompt_lifecycle* lifecycle,
     }
 }
 
-static void clear_active(tmuxremote_prompt_lifecycle* lifecycle)
+static void clear_active(pe_prompt_lifecycle* lifecycle)
 {
     if (!lifecycle->has_active) {
         return;
     }
 
-    tmuxremote_prompt_instance_free(&lifecycle->active);
+    pe_prompt_instance_free(&lifecycle->active);
     lifecycle->has_active = false;
     lifecycle->absence_snapshots = 0;
 }
 
-static bool candidate_to_instance_with_id(const tmuxremote_prompt_candidate* candidate,
-                                          tmuxremote_prompt_instance* out_instance)
+static bool candidate_to_instance_with_id(const pe_prompt_candidate* candidate,
+                                          pe_prompt_instance* out_instance)
 {
-    if (!tmuxremote_prompt_candidate_to_instance(candidate, out_instance)) {
+    if (!pe_prompt_candidate_to_instance(candidate, out_instance)) {
         return false;
     }
 
@@ -86,12 +86,12 @@ static bool candidate_to_instance_with_id(const tmuxremote_prompt_candidate* can
     return true;
 }
 
-void tmuxremote_prompt_lifecycle_init(tmuxremote_prompt_lifecycle* lifecycle)
+void pe_prompt_lifecycle_init(pe_prompt_lifecycle* lifecycle)
 {
     memset(lifecycle, 0, sizeof(*lifecycle));
 }
 
-void tmuxremote_prompt_lifecycle_free(tmuxremote_prompt_lifecycle* lifecycle)
+void pe_prompt_lifecycle_free(pe_prompt_lifecycle* lifecycle)
 {
     if (lifecycle == NULL) {
         return;
@@ -99,15 +99,15 @@ void tmuxremote_prompt_lifecycle_free(tmuxremote_prompt_lifecycle* lifecycle)
     clear_active(lifecycle);
 }
 
-void tmuxremote_prompt_lifecycle_set_callback(tmuxremote_prompt_lifecycle* lifecycle,
-                                              tmuxremote_prompt_lifecycle_callback callback,
-                                              void* user_data)
+void pe_prompt_lifecycle_set_callback(pe_prompt_lifecycle* lifecycle,
+                                       pe_prompt_lifecycle_callback callback,
+                                       void* user_data)
 {
     lifecycle->callback = callback;
     lifecycle->callback_user_data = user_data;
 }
 
-static bool is_suppressed(tmuxremote_prompt_lifecycle* lifecycle,
+static bool is_suppressed(pe_prompt_lifecycle* lifecycle,
                           const char* instance_id)
 {
     return lifecycle->suppress_resolved &&
@@ -116,21 +116,21 @@ static bool is_suppressed(tmuxremote_prompt_lifecycle* lifecycle,
            strcmp(instance_id, lifecycle->resolved_instance_id) == 0;
 }
 
-void tmuxremote_prompt_lifecycle_process(tmuxremote_prompt_lifecycle* lifecycle,
-                                         const tmuxremote_prompt_candidate* candidate,
-                                         uint64_t snapshot_sequence)
+void pe_prompt_lifecycle_process(pe_prompt_lifecycle* lifecycle,
+                                  const pe_prompt_candidate* candidate,
+                                  uint64_t snapshot_sequence)
 {
     lifecycle->last_sequence = snapshot_sequence;
 
-    tmuxremote_prompt_instance incoming;
-    tmuxremote_prompt_instance_reset(&incoming);
+    pe_prompt_instance incoming;
+    pe_prompt_instance_reset(&incoming);
 
     bool has_incoming = false;
     bool suppressed_incoming = false;
     if (candidate != NULL) {
         has_incoming = candidate_to_instance_with_id(candidate, &incoming);
         if (has_incoming && is_suppressed(lifecycle, incoming.instance_id)) {
-            tmuxremote_prompt_instance_free(&incoming);
+            pe_prompt_instance_free(&incoming);
             has_incoming = false;
             suppressed_incoming = true;
         }
@@ -144,15 +144,15 @@ void tmuxremote_prompt_lifecycle_process(tmuxremote_prompt_lifecycle* lifecycle,
     if (!lifecycle->has_active) {
         if (has_incoming) {
             incoming.revision = 1;
-            if (tmuxremote_prompt_instance_copy(&incoming, &lifecycle->active)) {
+            if (pe_prompt_instance_copy(&incoming, &lifecycle->active)) {
                 lifecycle->has_active = true;
                 lifecycle->absence_snapshots = 0;
                 emit_event(lifecycle,
-                           TMUXREMOTE_PROMPT_EVENT_PRESENT,
+                           PE_PROMPT_EVENT_PRESENT,
                            &lifecycle->active,
                            lifecycle->active.instance_id);
             }
-            tmuxremote_prompt_instance_free(&incoming);
+            pe_prompt_instance_free(&incoming);
             return;
         }
 
@@ -166,14 +166,14 @@ void tmuxremote_prompt_lifecycle_process(tmuxremote_prompt_lifecycle* lifecycle,
 
     if (!has_incoming) {
         lifecycle->absence_snapshots++;
-        if (lifecycle->absence_snapshots >= TMUXREMOTE_PROMPT_ABSENCE_SNAPSHOTS) {
-            char gone_id[TMUXREMOTE_PROMPT_INSTANCE_ID_MAX];
+        if (lifecycle->absence_snapshots >= PE_PROMPT_ABSENCE_SNAPSHOTS) {
+            char gone_id[PE_PROMPT_INSTANCE_ID_MAX];
             strncpy(gone_id, lifecycle->active.instance_id, sizeof(gone_id) - 1);
             gone_id[sizeof(gone_id) - 1] = '\0';
 
             clear_active(lifecycle);
             emit_event(lifecycle,
-                       TMUXREMOTE_PROMPT_EVENT_GONE,
+                       PE_PROMPT_EVENT_GONE,
                        NULL,
                        gone_id);
 
@@ -188,42 +188,42 @@ void tmuxremote_prompt_lifecycle_process(tmuxremote_prompt_lifecycle* lifecycle,
     if (strcmp(lifecycle->active.instance_id, incoming.instance_id) == 0) {
         incoming.revision = lifecycle->active.revision;
 
-        if (!tmuxremote_prompt_instance_same_semantics(&lifecycle->active, &incoming)) {
+        if (!pe_prompt_instance_same_semantics(&lifecycle->active, &incoming)) {
             incoming.revision = lifecycle->active.revision + 1;
             clear_active(lifecycle);
-            if (tmuxremote_prompt_instance_copy(&incoming, &lifecycle->active)) {
+            if (pe_prompt_instance_copy(&incoming, &lifecycle->active)) {
                 lifecycle->has_active = true;
                 emit_event(lifecycle,
-                           TMUXREMOTE_PROMPT_EVENT_UPDATE,
+                           PE_PROMPT_EVENT_UPDATE,
                            &lifecycle->active,
                            lifecycle->active.instance_id);
             }
         }
-        tmuxremote_prompt_instance_free(&incoming);
+        pe_prompt_instance_free(&incoming);
         return;
     }
 
-    char gone_id[TMUXREMOTE_PROMPT_INSTANCE_ID_MAX];
+    char gone_id[PE_PROMPT_INSTANCE_ID_MAX];
     strncpy(gone_id, lifecycle->active.instance_id, sizeof(gone_id) - 1);
     gone_id[sizeof(gone_id) - 1] = '\0';
 
     clear_active(lifecycle);
-    emit_event(lifecycle, TMUXREMOTE_PROMPT_EVENT_GONE, NULL, gone_id);
+    emit_event(lifecycle, PE_PROMPT_EVENT_GONE, NULL, gone_id);
 
     incoming.revision = 1;
-    if (tmuxremote_prompt_instance_copy(&incoming, &lifecycle->active)) {
+    if (pe_prompt_instance_copy(&incoming, &lifecycle->active)) {
         lifecycle->has_active = true;
         emit_event(lifecycle,
-                   TMUXREMOTE_PROMPT_EVENT_PRESENT,
+                   PE_PROMPT_EVENT_PRESENT,
                    &lifecycle->active,
                    lifecycle->active.instance_id);
     }
 
-    tmuxremote_prompt_instance_free(&incoming);
+    pe_prompt_instance_free(&incoming);
 }
 
-void tmuxremote_prompt_lifecycle_resolve(tmuxremote_prompt_lifecycle* lifecycle,
-                                         const char* instance_id)
+void pe_prompt_lifecycle_resolve(pe_prompt_lifecycle* lifecycle,
+                                  const char* instance_id)
 {
     if (instance_id == NULL || instance_id[0] == '\0') {
         return;
@@ -237,22 +237,22 @@ void tmuxremote_prompt_lifecycle_resolve(tmuxremote_prompt_lifecycle* lifecycle,
 
     if (lifecycle->has_active &&
         strcmp(lifecycle->active.instance_id, instance_id) == 0) {
-        char gone_id[TMUXREMOTE_PROMPT_INSTANCE_ID_MAX];
+        char gone_id[PE_PROMPT_INSTANCE_ID_MAX];
         strncpy(gone_id, lifecycle->active.instance_id, sizeof(gone_id) - 1);
         gone_id[sizeof(gone_id) - 1] = '\0';
 
         clear_active(lifecycle);
-        emit_event(lifecycle, TMUXREMOTE_PROMPT_EVENT_GONE, NULL, gone_id);
+        emit_event(lifecycle, PE_PROMPT_EVENT_GONE, NULL, gone_id);
     }
 }
 
-bool tmuxremote_prompt_lifecycle_copy_active(
-    tmuxremote_prompt_lifecycle* lifecycle,
-    tmuxremote_prompt_instance* out_instance)
+bool pe_prompt_lifecycle_copy_active(
+    pe_prompt_lifecycle* lifecycle,
+    pe_prompt_instance* out_instance)
 {
     if (lifecycle == NULL || out_instance == NULL || !lifecycle->has_active) {
         return false;
     }
 
-    return tmuxremote_prompt_instance_copy(&lifecycle->active, out_instance);
+    return pe_prompt_instance_copy(&lifecycle->active, out_instance);
 }

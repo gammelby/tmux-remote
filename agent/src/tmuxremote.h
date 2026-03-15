@@ -3,7 +3,7 @@
 
 #include "tmuxremote_coap_handler.h"
 #include "tmuxremote_control_stream.h"
-#include "tmuxremote_pattern_config.h"
+#include "pe_pattern_config.h"
 #include "tmuxremote_session.h"
 #include "tmuxremote_stream.h"
 #include "tmuxremote_iam.h"
@@ -42,7 +42,7 @@ struct tmuxremote {
     struct tmuxremote_session_map sessionMap;
 
     /* Pattern detection config (shared by per-stream engines) */
-    tmuxremote_pattern_config* patternConfig;
+    pe_pattern_config* patternConfig;
 
     /* PTY recording file path (NULL if not recording) */
     char* recordPtyFile;

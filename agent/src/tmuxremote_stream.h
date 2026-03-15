@@ -10,8 +10,8 @@
 #include <stdio.h>
 #include <sys/types.h>
 
-#include "tmuxremote_prompt_detector.h"
-#include "tmuxremote_prompt.h"
+#include "pe_detector.h"
+#include "pe_prompt.h"
 #include "tmuxremote_session.h"
 
 #define TMUXREMOTE_STREAM_BUFFER_SIZE 4096
@@ -28,7 +28,7 @@ struct tmuxremote_active_stream {
     atomic_bool closing;
     atomic_bool closeStarted;
 
-    tmuxremote_prompt_detector promptDetector;
+    pe_detector promptDetector;
     bool promptDetectorInitialized;
     NabtoDeviceConnectionRef connectionRef;
 
@@ -75,7 +75,7 @@ void tmuxremote_stream_resize_prompt_detector_for_ref(
     int cols,
     int rows);
 
-tmuxremote_prompt_instance* tmuxremote_stream_copy_active_prompt_for_ref(
+pe_prompt_instance* tmuxremote_stream_copy_active_prompt_for_ref(
     struct tmuxremote_stream_listener* sl,
     NabtoDeviceConnectionRef ref);
 

@@ -101,9 +101,9 @@ static bool load_pattern_configs(struct tmuxremote* app);
 static bool load_default_pattern_config(struct tmuxremote* app);
 static void print_help(void);
 static int cmp_str_ptr(const void* a, const void* b);
-static bool merge_agent_into_config(tmuxremote_pattern_config* merged,
-                                    tmuxremote_agent_config* agent);
-static bool has_duplicate_pattern_ids(const tmuxremote_agent_config* agent);
+static bool merge_agent_into_config(pe_pattern_config* merged,
+                                    pe_agent_config* agent);
+static bool has_duplicate_pattern_ids(const pe_agent_config* agent);
 
 static const char* TMUXREMOTE_DEFAULT_PATTERN_CONFIG_JSON =
     "{\n"
@@ -764,7 +764,7 @@ bool load_pattern_configs(struct tmuxremote* app)
     }
 
     if (app->patternConfig != NULL) {
-        tmuxremote_pattern_config_free(app->patternConfig);
+        pe_pattern_config_free(app->patternConfig);
         app->patternConfig = NULL;
     }
 
@@ -797,7 +797,7 @@ bool load_pattern_configs(struct tmuxremote* app)
 
     qsort(fileNames, fileCount, sizeof(char*), cmp_str_ptr);
 
-    tmuxremote_pattern_config* merged = calloc(1, sizeof(tmuxremote_pattern_config));
+    pe_pattern_config* merged = calloc(1, sizeof(pe_pattern_config));
     if (merged == NULL) {
         for (size_t i = 0; i < fileCount; i++) {
             free(fileNames[i]);
@@ -849,7 +849,7 @@ bool load_pattern_configs(struct tmuxremote* app)
         }
         json[readLen] = '\0';
 
-        tmuxremote_pattern_config* cfg = tmuxremote_pattern_config_parse(json, readLen);
+        pe_pattern_config* cfg = pe_pattern_config_parse(json, readLen);
         free(json);
 
         if (cfg == NULL) {
@@ -864,13 +864,13 @@ bool load_pattern_configs(struct tmuxremote* app)
         } else if (cfg->version != merged->version) {
             printf("Error: pattern config version mismatch in %s (expected %d, got %d)" NEWLINE,
                    filePath, merged->version, cfg->version);
-            tmuxremote_pattern_config_free(cfg);
+            pe_pattern_config_free(cfg);
             ok = false;
             break;
         }
 
         for (int ai = 0; ai < cfg->agent_count; ai++) {
-            tmuxremote_agent_config* agent = &cfg->agents[ai];
+            pe_agent_config* agent = &cfg->agents[ai];
 
             if (has_duplicate_pattern_ids(agent)) {
                 printf("Error: duplicate pattern ids for agent '%s' in %s" NEWLINE,
@@ -887,7 +887,7 @@ bool load_pattern_configs(struct tmuxremote* app)
             }
         }
 
-        tmuxremote_pattern_config_free(cfg);
+        pe_pattern_config_free(cfg);
         if (!ok) {
             break;
         }
@@ -899,7 +899,7 @@ bool load_pattern_configs(struct tmuxremote* app)
     free(fileNames);
 
     if (!ok) {
-        tmuxremote_pattern_config_free(merged);
+        pe_pattern_config_free(merged);
         return false;
     }
 
@@ -908,7 +908,7 @@ bool load_pattern_configs(struct tmuxremote* app)
         info_printf("Pattern config loaded (%d agents), activates per-session" NEWLINE,
                     merged->agent_count);
     } else {
-        tmuxremote_pattern_config_free(merged);
+        pe_pattern_config_free(merged);
         printf("Error: no valid agents loaded from pattern config files" NEWLINE);
         return false;
     }
@@ -919,17 +919,17 @@ bool load_pattern_configs(struct tmuxremote* app)
 static bool load_default_pattern_config(struct tmuxremote* app)
 {
     if (app->patternConfig != NULL) {
-        tmuxremote_pattern_config_free(app->patternConfig);
+        pe_pattern_config_free(app->patternConfig);
         app->patternConfig = NULL;
     }
 
     size_t jsonLen = strlen(TMUXREMOTE_DEFAULT_PATTERN_CONFIG_JSON);
-    tmuxremote_pattern_config* cfg =
-        tmuxremote_pattern_config_parse(TMUXREMOTE_DEFAULT_PATTERN_CONFIG_JSON,
+    pe_pattern_config* cfg =
+        pe_pattern_config_parse(TMUXREMOTE_DEFAULT_PATTERN_CONFIG_JSON,
                                         jsonLen);
     if (cfg == NULL || cfg->agent_count <= 0) {
         if (cfg != NULL) {
-            tmuxremote_pattern_config_free(cfg);
+            pe_pattern_config_free(cfg);
         }
         printf("Error: failed to parse embedded default pattern config" NEWLINE);
         return false;
@@ -948,8 +948,8 @@ static int cmp_str_ptr(const void* a, const void* b)
     return strcmp(*sa, *sb);
 }
 
-static bool merge_agent_into_config(tmuxremote_pattern_config* merged,
-                                    tmuxremote_agent_config* agent)
+static bool merge_agent_into_config(pe_pattern_config* merged,
+                                    pe_agent_config* agent)
 {
     if (merged == NULL || agent == NULL || agent->id == NULL) {
         return false;
@@ -962,8 +962,8 @@ static bool merge_agent_into_config(tmuxremote_pattern_config* merged,
         }
     }
 
-    tmuxremote_agent_config* newAgents = realloc(
-        merged->agents, sizeof(tmuxremote_agent_config) * (merged->agent_count + 1));
+    pe_agent_config* newAgents = realloc(
+        merged->agents, sizeof(pe_agent_config) * (merged->agent_count + 1));
     if (newAgents == NULL) {
         return false;
     }
@@ -975,7 +975,7 @@ static bool merge_agent_into_config(tmuxremote_pattern_config* merged,
     return true;
 }
 
-static bool has_duplicate_pattern_ids(const tmuxremote_agent_config* agent)
+static bool has_duplicate_pattern_ids(const pe_agent_config* agent)
 {
     if (agent == NULL) {
         return true;

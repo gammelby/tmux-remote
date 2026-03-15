@@ -132,7 +132,7 @@ void tmuxremote_stream_listener_deinit(struct tmuxremote_stream_listener* sl)
             as->childPid = -1;
         }
         if (as->promptDetectorInitialized) {
-            tmuxremote_prompt_detector_free(&as->promptDetector);
+            pe_detector_free(&as->promptDetector);
             as->promptDetectorInitialized = false;
         }
         if (as->stream != NULL) {
@@ -153,18 +153,18 @@ void tmuxremote_stream_listener_deinit(struct tmuxremote_stream_listener* sl)
     pthread_mutex_destroy(&sl->activeStreamsMutex);
 }
 
-tmuxremote_prompt_instance* tmuxremote_stream_copy_active_prompt_for_ref(
+pe_prompt_instance* tmuxremote_stream_copy_active_prompt_for_ref(
     struct tmuxremote_stream_listener* sl,
     NabtoDeviceConnectionRef ref)
 {
-    tmuxremote_prompt_instance* result = NULL;
+    pe_prompt_instance* result = NULL;
 
     pthread_mutex_lock(&sl->activeStreamsMutex);
     struct tmuxremote_active_stream* as = sl->activeStreams;
     while (as != NULL) {
         if (!atomic_load(&as->closing) && as->promptDetectorInitialized &&
             as->connectionRef == ref) {
-            result = tmuxremote_prompt_detector_copy_active(&as->promptDetector);
+            result = pe_detector_copy_active(&as->promptDetector);
             break;
         }
         as = as->next;
@@ -186,7 +186,7 @@ void tmuxremote_stream_resolve_prompt_for_ref(
     while (as != NULL) {
         if (!atomic_load(&as->closing) && as->promptDetectorInitialized &&
             as->connectionRef == ref) {
-            tmuxremote_prompt_detector_resolve(&as->promptDetector,
+            pe_detector_resolve(&as->promptDetector,
                                                instance_id,
                                                decision,
                                                keys);
@@ -231,7 +231,7 @@ void tmuxremote_stream_resize_prompt_detector_for_ref(
             as->connectionRef == ref) {
             as->sessionCols = (uint16_t)cols;
             as->sessionRows = (uint16_t)rows;
-            tmuxremote_prompt_detector_resize(&as->promptDetector, rows, cols);
+            pe_detector_resize(&as->promptDetector, rows, cols);
             break;
         }
         as = as->next;
@@ -329,15 +329,15 @@ static void stream_accepted(NabtoDeviceFuture* future,
     as->setupThreadStarted = true;
 }
 
-static void prompt_stream_callback(tmuxremote_prompt_event_type type,
-                                   const tmuxremote_prompt_instance* instance,
+static void prompt_stream_callback(pe_prompt_event_type type,
+                                   const pe_prompt_instance* instance,
                                    const char* instance_id,
                                    void* user_data)
 {
     struct tmuxremote_active_stream* as = user_data;
 
     switch (type) {
-        case TMUXREMOTE_PROMPT_EVENT_PRESENT:
+        case PE_PROMPT_EVENT_PRESENT:
             if (instance != NULL) {
                 tmuxremote_control_stream_send_prompt_present_for_ref(
                     &as->app->controlStreamListener,
@@ -345,7 +345,7 @@ static void prompt_stream_callback(tmuxremote_prompt_event_type type,
                     instance);
             }
             break;
-        case TMUXREMOTE_PROMPT_EVENT_UPDATE:
+        case PE_PROMPT_EVENT_UPDATE:
             if (instance != NULL) {
                 tmuxremote_control_stream_send_prompt_update_for_ref(
                     &as->app->controlStreamListener,
@@ -353,7 +353,7 @@ static void prompt_stream_callback(tmuxremote_prompt_event_type type,
                     instance);
             }
             break;
-        case TMUXREMOTE_PROMPT_EVENT_GONE:
+        case PE_PROMPT_EVENT_GONE:
             if (instance_id != NULL) {
                 tmuxremote_control_stream_send_prompt_gone_for_ref(
                     &as->app->controlStreamListener,
@@ -394,17 +394,17 @@ static void* stream_setup_thread(void* arg)
 
     as->childPid = pid;
 
-    tmuxremote_prompt_detector_init(&as->promptDetector,
+    pe_detector_init(&as->promptDetector,
                                     as->sessionRows > 0 ? as->sessionRows : 48,
                                     as->sessionCols > 0 ? as->sessionCols : 160);
     as->promptDetectorInitialized = true;
 
     if (as->app->patternConfig != NULL) {
-        tmuxremote_prompt_detector_load_config(&as->promptDetector,
+        pe_detector_load_config(&as->promptDetector,
                                                as->app->patternConfig);
     }
 
-    tmuxremote_prompt_detector_set_callback(&as->promptDetector,
+    pe_detector_set_callback(&as->promptDetector,
                                             prompt_stream_callback,
                                             as);
 
@@ -555,7 +555,7 @@ static void* pty_reader_thread(void* arg)
         }
 
         if (as->promptDetectorInitialized) {
-            tmuxremote_prompt_detector_feed(&as->promptDetector, buf, (size_t)n);
+            pe_detector_feed(&as->promptDetector, buf, (size_t)n);
         }
 
         NabtoDeviceFuture* writeFuture = nabto_device_future_new(as->device);
@@ -643,7 +643,7 @@ static void* cleanup_thread_func(void* arg)
     }
 
     if (as->promptDetectorInitialized) {
-        tmuxremote_prompt_detector_free(&as->promptDetector);
+        pe_detector_free(&as->promptDetector);
         as->promptDetectorInitialized = false;
     }
 

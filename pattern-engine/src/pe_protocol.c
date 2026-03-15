@@ -1,4 +1,4 @@
-#include "tmuxremote_prompt_protocol.h"
+#include "pe_protocol.h"
 
 #include <arpa/inet.h>
 #include <stdlib.h>
@@ -8,14 +8,14 @@
 
 #define PROMPT_CBOR_MAX 8192
 
-static const char* prompt_type_to_string(tmuxremote_prompt_type type)
+static const char* prompt_type_to_string(pe_prompt_type type)
 {
     switch (type) {
-        case TMUXREMOTE_PROMPT_TYPE_NUMBERED_MENU:
+        case PE_PROMPT_TYPE_NUMBERED_MENU:
             return "numbered_menu";
-        case TMUXREMOTE_PROMPT_TYPE_ACCEPT_REJECT:
+        case PE_PROMPT_TYPE_ACCEPT_REJECT:
             return "accept_reject";
-        case TMUXREMOTE_PROMPT_TYPE_YES_NO:
+        case PE_PROMPT_TYPE_YES_NO:
         default:
             return "yes_no";
     }
@@ -40,7 +40,7 @@ static uint8_t* wrap_framed_payload(const uint8_t* payload,
 }
 
 static bool encode_actions(CborEncoder* map,
-                           const tmuxremote_prompt_instance* instance)
+                           const pe_prompt_instance* instance)
 {
     cbor_encode_text_stringz(map, "actions");
     CborEncoder actions;
@@ -72,7 +72,7 @@ static bool encode_actions(CborEncoder* map,
 }
 
 static uint8_t* encode_instance_message(const char* type,
-                                        const tmuxremote_prompt_instance* instance,
+                                        const pe_prompt_instance* instance,
                                         size_t* out_len)
 {
     if (instance == NULL || out_len == NULL) {
@@ -122,21 +122,21 @@ static uint8_t* encode_instance_message(const char* type,
     return wrap_framed_payload(payload, payload_len, out_len);
 }
 
-uint8_t* tmuxremote_prompt_protocol_encode_present(
-    const tmuxremote_prompt_instance* instance,
+uint8_t* pe_protocol_encode_present(
+    const pe_prompt_instance* instance,
     size_t* out_len)
 {
     return encode_instance_message("pattern_present", instance, out_len);
 }
 
-uint8_t* tmuxremote_prompt_protocol_encode_update(
-    const tmuxremote_prompt_instance* instance,
+uint8_t* pe_protocol_encode_update(
+    const pe_prompt_instance* instance,
     size_t* out_len)
 {
     return encode_instance_message("pattern_update", instance, out_len);
 }
 
-uint8_t* tmuxremote_prompt_protocol_encode_gone(
+uint8_t* pe_protocol_encode_gone(
     const char* instance_id,
     size_t* out_len)
 {
@@ -182,10 +182,10 @@ static char* map_string(CborValue* map, const char* key)
     return out;
 }
 
-bool tmuxremote_prompt_protocol_decode_resolve(
+bool pe_protocol_decode_resolve(
     const uint8_t* framed_data,
     size_t framed_len,
-    tmuxremote_prompt_resolve_message* out)
+    pe_prompt_resolve_message* out)
 {
     if (out == NULL) {
         return false;
@@ -224,21 +224,21 @@ bool tmuxremote_prompt_protocol_decode_resolve(
     out->keys = map_string(&root, "keys");
 
     if (out->instance_id == NULL || out->decision == NULL) {
-        tmuxremote_prompt_protocol_free_resolve(out);
+        pe_protocol_free_resolve(out);
         return false;
     }
 
     if (strcmp(out->decision, "action") != 0 &&
         strcmp(out->decision, "dismiss") != 0) {
-        tmuxremote_prompt_protocol_free_resolve(out);
+        pe_protocol_free_resolve(out);
         return false;
     }
 
     return true;
 }
 
-void tmuxremote_prompt_protocol_free_resolve(
-    tmuxremote_prompt_resolve_message* message)
+void pe_protocol_free_resolve(
+    pe_prompt_resolve_message* message)
 {
     if (message == NULL) {
         return;

@@ -5,14 +5,14 @@
 #include <arpa/inet.h>
 #include <tinycbor/cbor.h>
 
-#include "tmuxremote_prompt_protocol.h"
+#include "pe_protocol.h"
 
-static void build_test_instance(tmuxremote_prompt_instance* instance)
+static void build_test_instance(pe_prompt_instance* instance)
 {
-    tmuxremote_prompt_instance_reset(instance);
+    pe_prompt_instance_reset(instance);
     strncpy(instance->instance_id, "abc123", sizeof(instance->instance_id) - 1);
     instance->pattern_id = strdup("rule-1");
-    instance->pattern_type = TMUXREMOTE_PROMPT_TYPE_YES_NO;
+    instance->pattern_type = PE_PROMPT_TYPE_YES_NO;
     instance->prompt = strdup("Continue?");
     instance->actions[0].label = strdup("Yes");
     instance->actions[0].keys = strdup("y");
@@ -58,11 +58,11 @@ static char* decode_type_field(const uint8_t* framed, size_t len)
 
 START_TEST(test_encode_present_update_gone)
 {
-    tmuxremote_prompt_instance instance;
+    pe_prompt_instance instance;
     build_test_instance(&instance);
 
     size_t len = 0;
-    uint8_t* present = tmuxremote_prompt_protocol_encode_present(&instance, &len);
+    uint8_t* present = pe_protocol_encode_present(&instance, &len);
     ck_assert_ptr_nonnull(present);
     ck_assert_int_gt((int)len, 4);
 
@@ -73,7 +73,7 @@ START_TEST(test_encode_present_update_gone)
 
     free(present);
 
-    uint8_t* update = tmuxremote_prompt_protocol_encode_update(&instance, &len);
+    uint8_t* update = pe_protocol_encode_update(&instance, &len);
     ck_assert_ptr_nonnull(update);
     type = decode_type_field(update, len);
     ck_assert_ptr_nonnull(type);
@@ -81,7 +81,7 @@ START_TEST(test_encode_present_update_gone)
     free(type);
     free(update);
 
-    uint8_t* gone = tmuxremote_prompt_protocol_encode_gone("abc123", &len);
+    uint8_t* gone = pe_protocol_encode_gone("abc123", &len);
     ck_assert_ptr_nonnull(gone);
     type = decode_type_field(gone, len);
     ck_assert_ptr_nonnull(type);
@@ -89,7 +89,7 @@ START_TEST(test_encode_present_update_gone)
     free(type);
     free(gone);
 
-    tmuxremote_prompt_instance_free(&instance);
+    pe_prompt_instance_free(&instance);
 }
 END_TEST
 
@@ -117,23 +117,101 @@ START_TEST(test_decode_resolve)
     memcpy(framed, &be, 4);
     memcpy(framed + 4, payload, payload_len);
 
-    tmuxremote_prompt_resolve_message msg;
-    ck_assert(tmuxremote_prompt_protocol_decode_resolve(framed, payload_len + 4, &msg));
+    pe_prompt_resolve_message msg;
+    ck_assert(pe_protocol_decode_resolve(framed, payload_len + 4, &msg));
     ck_assert_str_eq(msg.instance_id, "abc123");
     ck_assert_str_eq(msg.decision, "action");
     ck_assert_str_eq(msg.keys, "1\n");
 
-    tmuxremote_prompt_protocol_free_resolve(&msg);
+    pe_protocol_free_resolve(&msg);
 }
 END_TEST
 
-Suite* prompt_protocol_suite(void)
+START_TEST(test_reject_invalid_decision)
 {
-    Suite* s = suite_create("PromptProtocol");
+    uint8_t payload[256];
+    CborEncoder root;
+    cbor_encoder_init(&root, payload, sizeof(payload), 0);
+
+    CborEncoder map;
+    cbor_encoder_create_map(&root, &map, 4);
+    cbor_encode_text_stringz(&map, "type");
+    cbor_encode_text_stringz(&map, "pattern_resolve");
+    cbor_encode_text_stringz(&map, "instance_id");
+    cbor_encode_text_stringz(&map, "abc123");
+    cbor_encode_text_stringz(&map, "decision");
+    cbor_encode_text_stringz(&map, "foo");
+    cbor_encode_text_stringz(&map, "keys");
+    cbor_encode_text_stringz(&map, "x");
+    ck_assert_int_eq(cbor_encoder_close_container(&root, &map), CborNoError);
+
+    size_t payload_len = cbor_encoder_get_buffer_size(&root, payload);
+    uint8_t framed[260];
+    uint32_t be = htonl((uint32_t)payload_len);
+    memcpy(framed, &be, 4);
+    memcpy(framed + 4, payload, payload_len);
+
+    pe_prompt_resolve_message msg;
+    bool ok = pe_protocol_decode_resolve(framed, payload_len + 4, &msg);
+    ck_assert(!ok);
+}
+END_TEST
+
+START_TEST(test_reject_truncated_frame)
+{
+    /* Build a valid framed message, then truncate it */
+    uint8_t payload[256];
+    CborEncoder root;
+    cbor_encoder_init(&root, payload, sizeof(payload), 0);
+
+    CborEncoder map;
+    cbor_encoder_create_map(&root, &map, 4);
+    cbor_encode_text_stringz(&map, "type");
+    cbor_encode_text_stringz(&map, "pattern_resolve");
+    cbor_encode_text_stringz(&map, "instance_id");
+    cbor_encode_text_stringz(&map, "abc123");
+    cbor_encode_text_stringz(&map, "decision");
+    cbor_encode_text_stringz(&map, "action");
+    cbor_encode_text_stringz(&map, "keys");
+    cbor_encode_text_stringz(&map, "y");
+    ck_assert_int_eq(cbor_encoder_close_container(&root, &map), CborNoError);
+
+    size_t payload_len = cbor_encoder_get_buffer_size(&root, payload);
+    uint8_t framed[260];
+    /* Declare a length larger than actual data */
+    uint32_t be = htonl((uint32_t)(payload_len + 100));
+    memcpy(framed, &be, 4);
+    memcpy(framed + 4, payload, payload_len);
+
+    pe_prompt_resolve_message msg;
+    /* Pass the actual total size (header + real payload), but header says more */
+    bool ok = pe_protocol_decode_resolve(framed, 4 + payload_len, &msg);
+    ck_assert(!ok);
+}
+END_TEST
+
+START_TEST(test_reject_empty_payload)
+{
+    uint8_t framed[4];
+    uint32_t be = htonl(0);
+    memcpy(framed, &be, 4);
+
+    pe_prompt_resolve_message msg;
+    bool ok = pe_protocol_decode_resolve(framed, 4, &msg);
+    ck_assert(!ok);
+}
+END_TEST
+
+Suite* protocol_suite(void)
+{
+    Suite* s = suite_create("Protocol");
     TCase* tc = tcase_create("Core");
 
     tcase_add_test(tc, test_encode_present_update_gone);
     tcase_add_test(tc, test_decode_resolve);
+    tcase_add_test(tc, test_reject_invalid_decision);
+    tcase_add_test(tc, test_reject_truncated_frame);
+    tcase_add_test(tc, test_reject_empty_payload);
 
     suite_add_tcase(s, tc);
     return s;
@@ -141,7 +219,7 @@ Suite* prompt_protocol_suite(void)
 
 int main(void)
 {
-    Suite* s = prompt_protocol_suite();
+    Suite* s = protocol_suite();
     SRunner* sr = srunner_create(s);
     srunner_run_all(sr, CK_NORMAL);
     int failed = srunner_ntests_failed(sr);

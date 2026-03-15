@@ -1,19 +1,19 @@
-#include "tmuxremote_pattern_config.h"
+#include "pe_pattern_config.h"
 
 #include <cjson/cJSON.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define TMUXREMOTE_PATTERN_CONFIG_VERSION 3
-#define TMUXREMOTE_DEFAULT_MAX_SCAN_LINES 10
+#define PE_PATTERN_CONFIG_VERSION 3
+#define PE_DEFAULT_MAX_SCAN_LINES 10
 
 static char* strdup_safe(const char* s)
 {
     return (s != NULL) ? strdup(s) : NULL;
 }
 
-static tmuxremote_prompt_type parse_type(const char* s, bool* ok)
+static pe_prompt_type parse_type(const char* s, bool* ok)
 {
     if (ok != NULL) {
         *ok = true;
@@ -23,26 +23,26 @@ static tmuxremote_prompt_type parse_type(const char* s, bool* ok)
         if (ok != NULL) {
             *ok = false;
         }
-        return TMUXREMOTE_PROMPT_TYPE_YES_NO;
+        return PE_PROMPT_TYPE_YES_NO;
     }
 
     if (strcmp(s, "yes_no") == 0) {
-        return TMUXREMOTE_PROMPT_TYPE_YES_NO;
+        return PE_PROMPT_TYPE_YES_NO;
     }
     if (strcmp(s, "numbered_menu") == 0) {
-        return TMUXREMOTE_PROMPT_TYPE_NUMBERED_MENU;
+        return PE_PROMPT_TYPE_NUMBERED_MENU;
     }
     if (strcmp(s, "accept_reject") == 0) {
-        return TMUXREMOTE_PROMPT_TYPE_ACCEPT_REJECT;
+        return PE_PROMPT_TYPE_ACCEPT_REJECT;
     }
 
     if (ok != NULL) {
         *ok = false;
     }
-    return TMUXREMOTE_PROMPT_TYPE_YES_NO;
+    return PE_PROMPT_TYPE_YES_NO;
 }
 
-static void free_definition(tmuxremote_pattern_definition* d)
+static void free_definition(pe_pattern_definition* d)
 {
     if (d == NULL) {
         return;
@@ -67,7 +67,7 @@ static void free_definition(tmuxremote_pattern_definition* d)
 }
 
 static bool parse_actions(cJSON* actions,
-                          tmuxremote_pattern_action** out_actions,
+                          pe_pattern_action** out_actions,
                           int* out_count)
 {
     *out_actions = NULL;
@@ -82,8 +82,8 @@ static bool parse_actions(cJSON* actions,
         return true;
     }
 
-    tmuxremote_pattern_action* parsed = calloc((size_t)count,
-                                               sizeof(tmuxremote_pattern_action));
+    pe_pattern_action* parsed = calloc((size_t)count,
+                                       sizeof(pe_pattern_action));
     if (parsed == NULL) {
         return false;
     }
@@ -118,7 +118,7 @@ static bool parse_actions(cJSON* actions,
 }
 
 static bool parse_action_template(cJSON* item,
-                                  tmuxremote_pattern_action_template** out_template)
+                                  pe_pattern_action_template** out_template)
 {
     *out_template = NULL;
 
@@ -132,7 +132,7 @@ static bool parse_action_template(cJSON* item,
         return true;
     }
 
-    tmuxremote_pattern_action_template* parsed = calloc(1, sizeof(*parsed));
+    pe_pattern_action_template* parsed = calloc(1, sizeof(*parsed));
     if (parsed == NULL) {
         return false;
     }
@@ -147,7 +147,7 @@ static bool parse_action_template(cJSON* item,
     return true;
 }
 
-static bool parse_definition(cJSON* item, tmuxremote_pattern_definition* out)
+static bool parse_definition(cJSON* item, pe_pattern_definition* out)
 {
     memset(out, 0, sizeof(*out));
 
@@ -159,7 +159,7 @@ static bool parse_definition(cJSON* item, tmuxremote_pattern_definition* out)
         cJSON_GetObjectItem(item, "option_regex"));
 
     bool type_ok = false;
-    tmuxremote_prompt_type type = parse_type(type_string, &type_ok);
+    pe_prompt_type type = parse_type(type_string, &type_ok);
 
     if (id == NULL || prompt_regex == NULL || !type_ok) {
         return false;
@@ -187,12 +187,12 @@ static bool parse_definition(cJSON* item, tmuxremote_pattern_definition* out)
     }
 
     cJSON* max_scan_lines = cJSON_GetObjectItem(item, "max_scan_lines");
-    out->max_scan_lines = TMUXREMOTE_DEFAULT_MAX_SCAN_LINES;
+    out->max_scan_lines = PE_DEFAULT_MAX_SCAN_LINES;
     if (cJSON_IsNumber(max_scan_lines) && max_scan_lines->valueint > 0) {
         out->max_scan_lines = max_scan_lines->valueint;
     }
 
-    if (out->type == TMUXREMOTE_PROMPT_TYPE_NUMBERED_MENU) {
+    if (out->type == PE_PROMPT_TYPE_NUMBERED_MENU) {
         if (out->action_template == NULL || out->action_template->keys == NULL) {
             free_definition(out);
             return false;
@@ -207,8 +207,8 @@ static bool parse_definition(cJSON* item, tmuxremote_pattern_definition* out)
     return true;
 }
 
-tmuxremote_pattern_config* tmuxremote_pattern_config_parse(const char* json,
-                                                           size_t json_len)
+pe_pattern_config* pe_pattern_config_parse(const char* json,
+                                            size_t json_len)
 {
     cJSON* root = cJSON_ParseWithLength(json, json_len);
     if (root == NULL) {
@@ -218,13 +218,13 @@ tmuxremote_pattern_config* tmuxremote_pattern_config_parse(const char* json,
     cJSON* version = cJSON_GetObjectItem(root, "version");
     cJSON* agents_obj = cJSON_GetObjectItem(root, "agents");
 
-    if (!cJSON_IsNumber(version) || version->valueint != TMUXREMOTE_PATTERN_CONFIG_VERSION ||
+    if (!cJSON_IsNumber(version) || version->valueint != PE_PATTERN_CONFIG_VERSION ||
         !cJSON_IsObject(agents_obj)) {
         cJSON_Delete(root);
         return NULL;
     }
 
-    tmuxremote_pattern_config* config = calloc(1, sizeof(*config));
+    pe_pattern_config* config = calloc(1, sizeof(*config));
     if (config == NULL) {
         cJSON_Delete(root);
         return NULL;
@@ -234,9 +234,9 @@ tmuxremote_pattern_config* tmuxremote_pattern_config_parse(const char* json,
 
     int agent_count = cJSON_GetArraySize(agents_obj);
     config->agents = calloc((size_t)(agent_count > 0 ? agent_count : 1),
-                            sizeof(tmuxremote_agent_config));
+                            sizeof(pe_agent_config));
     if (config->agents == NULL) {
-        tmuxremote_pattern_config_free(config);
+        pe_pattern_config_free(config);
         cJSON_Delete(root);
         return NULL;
     }
@@ -249,7 +249,7 @@ tmuxremote_pattern_config* tmuxremote_pattern_config_parse(const char* json,
             continue;
         }
 
-        tmuxremote_agent_config* agent = &config->agents[valid_agents];
+        pe_agent_config* agent = &config->agents[valid_agents];
         agent->id = strdup(agent_id);
         agent->name = strdup_safe(cJSON_GetStringValue(
             cJSON_GetObjectItem(agent_item, "name")));
@@ -264,7 +264,7 @@ tmuxremote_pattern_config* tmuxremote_pattern_config_parse(const char* json,
         }
 
         agent->patterns = calloc((size_t)(rules_count > 0 ? rules_count : 1),
-                                 sizeof(tmuxremote_pattern_definition));
+                                 sizeof(pe_pattern_definition));
         if (agent->patterns == NULL) {
             free(agent->id);
             free(agent->name);
@@ -275,7 +275,7 @@ tmuxremote_pattern_config* tmuxremote_pattern_config_parse(const char* json,
         int valid_rules = 0;
         for (int i = 0; i < rules_count; i++) {
             cJSON* rule = cJSON_GetArrayItem(rules, i);
-            tmuxremote_pattern_definition parsed;
+            pe_pattern_definition parsed;
             if (!parse_definition(rule, &parsed)) {
                 continue;
             }
@@ -292,21 +292,21 @@ tmuxremote_pattern_config* tmuxremote_pattern_config_parse(const char* json,
     cJSON_Delete(root);
 
     if (config->agent_count == 0) {
-        tmuxremote_pattern_config_free(config);
+        pe_pattern_config_free(config);
         return NULL;
     }
 
     return config;
 }
 
-void tmuxremote_pattern_config_free(tmuxremote_pattern_config* config)
+void pe_pattern_config_free(pe_pattern_config* config)
 {
     if (config == NULL) {
         return;
     }
 
     for (int i = 0; i < config->agent_count; i++) {
-        tmuxremote_agent_config* agent = &config->agents[i];
+        pe_agent_config* agent = &config->agents[i];
 
         free(agent->id);
         free(agent->name);
@@ -321,8 +321,8 @@ void tmuxremote_pattern_config_free(tmuxremote_pattern_config* config)
     free(config);
 }
 
-const tmuxremote_agent_config* tmuxremote_pattern_config_find_agent(
-    const tmuxremote_pattern_config* config,
+const pe_agent_config* pe_pattern_config_find_agent(
+    const pe_pattern_config* config,
     const char* agent_id)
 {
     if (config == NULL || agent_id == NULL) {

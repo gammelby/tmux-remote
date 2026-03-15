@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <stdatomic.h>
 
-#include "tmuxremote_prompt.h"
+#include "pe_prompt.h"
 
 #define TMUXREMOTE_CONTROL_STREAM_PORT 2
 #define TMUXREMOTE_SESSION_POLL_INTERVAL_MS 2000
@@ -68,12 +68,12 @@ void tmuxremote_control_stream_notify(
 void tmuxremote_control_stream_send_prompt_present_for_ref(
     struct tmuxremote_control_stream_listener* csl,
     NabtoDeviceConnectionRef ref,
-    const tmuxremote_prompt_instance* instance);
+    const pe_prompt_instance* instance);
 
 void tmuxremote_control_stream_send_prompt_update_for_ref(
     struct tmuxremote_control_stream_listener* csl,
     NabtoDeviceConnectionRef ref,
-    const tmuxremote_prompt_instance* instance);
+    const pe_prompt_instance* instance);
 
 void tmuxremote_control_stream_send_prompt_gone_for_ref(
     struct tmuxremote_control_stream_listener* csl,

@@ -5,8 +5,8 @@
 
 #include <arpa/inet.h>
 
-#include "tmuxremote_pattern_config.h"
-#include "tmuxremote_prompt_detector.h"
+#include "pe_pattern_config.h"
+#include "pe_detector.h"
 
 #ifndef TEST_FIXTURES_DIR
 #error "TEST_FIXTURES_DIR must be defined"
@@ -28,19 +28,19 @@ typedef struct {
 } ptyr_frame;
 
 typedef struct {
-    tmuxremote_prompt_event_type type;
-    tmuxremote_prompt_type pattern_type;
+    pe_prompt_event_type type;
+    pe_prompt_type pattern_type;
     int action_count;
     bool has_primary_option;
     bool has_charset_artifact;
-    char id[TMUXREMOTE_PROMPT_INSTANCE_ID_MAX];
+    char id[PE_PROMPT_INSTANCE_ID_MAX];
 } replay_event;
 
 static replay_event events[2048];
 static int event_count = 0;
 
-static void on_event(tmuxremote_prompt_event_type type,
-                     const tmuxremote_prompt_instance* instance,
+static void on_event(pe_prompt_event_type type,
+                     const pe_prompt_instance* instance,
                      const char* instance_id,
                      void* user_data)
 {
@@ -128,7 +128,7 @@ static void free_frames(ptyr_frame* frames, int count)
     free(frames);
 }
 
-static tmuxremote_pattern_config* load_config(void)
+static pe_pattern_config* load_config(void)
 {
     FILE* f = fopen(CONFIG_PATH, "r");
     ck_assert_ptr_nonnull(f);
@@ -145,14 +145,14 @@ static tmuxremote_pattern_config* load_config(void)
     fclose(f);
     json[n] = '\0';
 
-    tmuxremote_pattern_config* config =
-        tmuxremote_pattern_config_parse(json, n);
+    pe_pattern_config* config =
+        pe_pattern_config_parse(json, n);
     free(json);
     ck_assert_ptr_nonnull(config);
     return config;
 }
 
-static int count_event_type(tmuxremote_prompt_event_type type)
+static int count_event_type(pe_prompt_event_type type)
 {
     int count = 0;
     for (int i = 0; i < event_count; i++) {
@@ -167,9 +167,9 @@ static void assert_no_present_gone_present_oscillation(void)
 {
     for (int i = 0; i + 2 < event_count; i++) {
         bool oscillation =
-            events[i].type == TMUXREMOTE_PROMPT_EVENT_PRESENT &&
-            events[i + 1].type == TMUXREMOTE_PROMPT_EVENT_GONE &&
-            events[i + 2].type == TMUXREMOTE_PROMPT_EVENT_PRESENT &&
+            events[i].type == PE_PROMPT_EVENT_PRESENT &&
+            events[i + 1].type == PE_PROMPT_EVENT_GONE &&
+            events[i + 2].type == PE_PROMPT_EVENT_PRESENT &&
             strcmp(events[i].id, events[i + 2].id) == 0;
         ck_assert_msg(!oscillation,
                       "unexpected oscillation for instance %s",
@@ -181,10 +181,10 @@ static void assert_numbered_menu_events_are_complete(void)
 {
     for (int i = 0; i < event_count; i++) {
         replay_event* ev = &events[i];
-        bool is_prompt_event = (ev->type == TMUXREMOTE_PROMPT_EVENT_PRESENT ||
-                                ev->type == TMUXREMOTE_PROMPT_EVENT_UPDATE);
+        bool is_prompt_event = (ev->type == PE_PROMPT_EVENT_PRESENT ||
+                                ev->type == PE_PROMPT_EVENT_UPDATE);
         if (!is_prompt_event ||
-            ev->pattern_type != TMUXREMOTE_PROMPT_TYPE_NUMBERED_MENU) {
+            ev->pattern_type != PE_PROMPT_TYPE_NUMBERED_MENU) {
             continue;
         }
 
@@ -204,35 +204,35 @@ static void assert_numbered_menu_events_are_complete(void)
 static void replay_frames(const ptyr_frame* frames,
                           int frame_count,
                           bool split_frames,
-                          tmuxremote_prompt_instance** out_active)
+                          pe_prompt_instance** out_active)
 {
-    tmuxremote_pattern_config* config = load_config();
+    pe_pattern_config* config = load_config();
 
-    tmuxremote_prompt_detector detector;
-    tmuxremote_prompt_detector_init(&detector, 48, 160);
-    tmuxremote_prompt_detector_set_callback(&detector, on_event, NULL);
-    tmuxremote_prompt_detector_load_config(&detector, config);
-    tmuxremote_prompt_detector_select_agent(&detector, "claude-code");
+    pe_detector detector;
+    pe_detector_init(&detector, 48, 160);
+    pe_detector_set_callback(&detector, on_event, NULL);
+    pe_detector_load_config(&detector, config);
+    pe_detector_select_agent(&detector, "claude-code");
 
     event_count = 0;
 
     for (int i = 0; i < frame_count; i++) {
         if (!split_frames || frames[i].len < 8) {
-            tmuxremote_prompt_detector_feed(&detector, frames[i].data, frames[i].len);
+            pe_detector_feed(&detector, frames[i].data, frames[i].len);
             continue;
         }
 
         size_t first = frames[i].len / 2;
-        tmuxremote_prompt_detector_feed(&detector, frames[i].data, first);
-        tmuxremote_prompt_detector_feed(&detector,
-                                        frames[i].data + first,
-                                        frames[i].len - first);
+        pe_detector_feed(&detector, frames[i].data, first);
+        pe_detector_feed(&detector,
+                         frames[i].data + first,
+                         frames[i].len - first);
     }
 
-    *out_active = tmuxremote_prompt_detector_copy_active(&detector);
+    *out_active = pe_detector_copy_active(&detector);
 
-    tmuxremote_prompt_detector_free(&detector);
-    tmuxremote_pattern_config_free(config);
+    pe_detector_free(&detector);
+    pe_pattern_config_free(config);
 }
 
 START_TEST(test_replay_detects_prompts)
@@ -240,14 +240,14 @@ START_TEST(test_replay_detects_prompts)
     int frame_count = 0;
     ptyr_frame* frames = load_recording(RECORDING_PATH, &frame_count);
 
-    tmuxremote_prompt_instance* active = NULL;
+    pe_prompt_instance* active = NULL;
     replay_frames(frames, frame_count, false, &active);
 
-    ck_assert_int_gt(count_event_type(TMUXREMOTE_PROMPT_EVENT_PRESENT), 0);
+    ck_assert_int_gt(count_event_type(PE_PROMPT_EVENT_PRESENT), 0);
     assert_no_present_gone_present_oscillation();
 
     if (active != NULL) {
-        tmuxremote_prompt_instance_free(active);
+        pe_prompt_instance_free(active);
         free(active);
     }
 
@@ -260,15 +260,15 @@ START_TEST(test_replay_sticky_prompt_remains_active)
     int frame_count = 0;
     ptyr_frame* frames = load_recording(RECORDING_PATH_STICKY, &frame_count);
 
-    tmuxremote_prompt_instance* active = NULL;
+    pe_prompt_instance* active = NULL;
     replay_frames(frames, frame_count, false, &active);
 
-    ck_assert_int_gt(count_event_type(TMUXREMOTE_PROMPT_EVENT_PRESENT), 0);
+    ck_assert_int_gt(count_event_type(PE_PROMPT_EVENT_PRESENT), 0);
     assert_no_present_gone_present_oscillation();
     ck_assert_ptr_nonnull(active);
 
     if (active != NULL) {
-        tmuxremote_prompt_instance_free(active);
+        pe_prompt_instance_free(active);
         free(active);
     }
 
@@ -281,15 +281,15 @@ START_TEST(test_replay_sticky_prompt_remains_active_2)
     int frame_count = 0;
     ptyr_frame* frames = load_recording(RECORDING_PATH_STICKY_2, &frame_count);
 
-    tmuxremote_prompt_instance* active = NULL;
+    pe_prompt_instance* active = NULL;
     replay_frames(frames, frame_count, false, &active);
 
-    ck_assert_int_gt(count_event_type(TMUXREMOTE_PROMPT_EVENT_PRESENT), 0);
+    ck_assert_int_gt(count_event_type(PE_PROMPT_EVENT_PRESENT), 0);
     assert_no_present_gone_present_oscillation();
     ck_assert_ptr_nonnull(active);
 
     if (active != NULL) {
-        tmuxremote_prompt_instance_free(active);
+        pe_prompt_instance_free(active);
         free(active);
     }
 
@@ -302,10 +302,10 @@ START_TEST(test_chunk_split_keeps_terminal_result)
     int frame_count = 0;
     ptyr_frame* frames = load_recording(RECORDING_PATH, &frame_count);
 
-    tmuxremote_prompt_instance* active_a = NULL;
+    pe_prompt_instance* active_a = NULL;
     replay_frames(frames, frame_count, false, &active_a);
 
-    tmuxremote_prompt_instance* active_b = NULL;
+    pe_prompt_instance* active_b = NULL;
     replay_frames(frames, frame_count, true, &active_b);
 
     if (active_a == NULL || active_b == NULL) {
@@ -315,11 +315,11 @@ START_TEST(test_chunk_split_keeps_terminal_result)
     }
 
     if (active_a != NULL) {
-        tmuxremote_prompt_instance_free(active_a);
+        pe_prompt_instance_free(active_a);
         free(active_a);
     }
     if (active_b != NULL) {
-        tmuxremote_prompt_instance_free(active_b);
+        pe_prompt_instance_free(active_b);
         free(active_b);
     }
 
@@ -332,17 +332,17 @@ START_TEST(test_replay_sticky_prompt_remains_complete_3)
     int frame_count = 0;
     ptyr_frame* frames = load_recording(RECORDING_PATH_STICKY_3, &frame_count);
 
-    tmuxremote_prompt_instance* active = NULL;
+    pe_prompt_instance* active = NULL;
     replay_frames(frames, frame_count, false, &active);
 
-    ck_assert_int_gt(count_event_type(TMUXREMOTE_PROMPT_EVENT_PRESENT), 0);
+    ck_assert_int_gt(count_event_type(PE_PROMPT_EVENT_PRESENT), 0);
     assert_no_present_gone_present_oscillation();
     assert_numbered_menu_events_are_complete();
     ck_assert_ptr_nonnull(active);
     ck_assert_int_ge(active->action_count, 3);
 
     if (active != NULL) {
-        tmuxremote_prompt_instance_free(active);
+        pe_prompt_instance_free(active);
         free(active);
     }
 
@@ -355,15 +355,15 @@ START_TEST(test_replay_sticky_prompt_remains_complete_4)
     int frame_count = 0;
     ptyr_frame* frames = load_recording(RECORDING_PATH_STICKY_4, &frame_count);
 
-    tmuxremote_prompt_instance* active = NULL;
+    pe_prompt_instance* active = NULL;
     replay_frames(frames, frame_count, false, &active);
 
-    ck_assert_int_gt(count_event_type(TMUXREMOTE_PROMPT_EVENT_PRESENT), 0);
+    ck_assert_int_gt(count_event_type(PE_PROMPT_EVENT_PRESENT), 0);
     assert_no_present_gone_present_oscillation();
     assert_numbered_menu_events_are_complete();
 
     if (active != NULL) {
-        tmuxremote_prompt_instance_free(active);
+        pe_prompt_instance_free(active);
         free(active);
     }
 
@@ -376,15 +376,15 @@ START_TEST(test_replay_external_resolution_emits_gone)
     int frame_count = 0;
     ptyr_frame* frames = load_recording(RECORDING_PATH_RESOLVED_EXTERNALLY, &frame_count);
 
-    tmuxremote_prompt_instance* active = NULL;
+    pe_prompt_instance* active = NULL;
     replay_frames(frames, frame_count, false, &active);
 
-    ck_assert_int_gt(count_event_type(TMUXREMOTE_PROMPT_EVENT_PRESENT), 0);
-    ck_assert_int_gt(count_event_type(TMUXREMOTE_PROMPT_EVENT_GONE), 0);
+    ck_assert_int_gt(count_event_type(PE_PROMPT_EVENT_PRESENT), 0);
+    ck_assert_int_gt(count_event_type(PE_PROMPT_EVENT_GONE), 0);
     ck_assert_ptr_null(active);
 
     if (active != NULL) {
-        tmuxremote_prompt_instance_free(active);
+        pe_prompt_instance_free(active);
         free(active);
     }
 
@@ -402,18 +402,18 @@ START_TEST(test_replay_recording_17_default_terminal_numbered_choice_overlay)
     int frame_count = 0;
     ptyr_frame* frames = load_recording(RECORDING_PATH_17, &frame_count);
 
-    tmuxremote_prompt_instance* active = NULL;
+    pe_prompt_instance* active = NULL;
     replay_frames(frames, frame_count, false, &active);
 
-    ck_assert_int_gt(count_event_type(TMUXREMOTE_PROMPT_EVENT_PRESENT), 0);
+    ck_assert_int_gt(count_event_type(PE_PROMPT_EVENT_PRESENT), 0);
     assert_no_present_gone_present_oscillation();
     assert_numbered_menu_events_are_complete();
     ck_assert_ptr_nonnull(active);
-    ck_assert_int_eq(active->pattern_type, TMUXREMOTE_PROMPT_TYPE_NUMBERED_MENU);
+    ck_assert_int_eq(active->pattern_type, PE_PROMPT_TYPE_NUMBERED_MENU);
     ck_assert_int_ge(active->action_count, 3);
 
     if (active != NULL) {
-        tmuxremote_prompt_instance_free(active);
+        pe_prompt_instance_free(active);
         free(active);
     }
 
@@ -431,18 +431,18 @@ START_TEST(test_replay_recording_18_default_terminal_numbered_choice_overlay)
     int frame_count = 0;
     ptyr_frame* frames = load_recording(RECORDING_PATH_18, &frame_count);
 
-    tmuxremote_prompt_instance* active = NULL;
+    pe_prompt_instance* active = NULL;
     replay_frames(frames, frame_count, false, &active);
 
-    ck_assert_int_gt(count_event_type(TMUXREMOTE_PROMPT_EVENT_PRESENT), 0);
+    ck_assert_int_gt(count_event_type(PE_PROMPT_EVENT_PRESENT), 0);
     assert_no_present_gone_present_oscillation();
     assert_numbered_menu_events_are_complete();
     ck_assert_ptr_nonnull(active);
-    ck_assert_int_eq(active->pattern_type, TMUXREMOTE_PROMPT_TYPE_NUMBERED_MENU);
+    ck_assert_int_eq(active->pattern_type, PE_PROMPT_TYPE_NUMBERED_MENU);
     ck_assert_int_ge(active->action_count, 3);
 
     if (active != NULL) {
-        tmuxremote_prompt_instance_free(active);
+        pe_prompt_instance_free(active);
         free(active);
     }
 
@@ -452,7 +452,7 @@ END_TEST
 
 Suite* replay_suite(void)
 {
-    Suite* s = suite_create("PromptDetectorReplay");
+    Suite* s = suite_create("DetectorReplay");
     TCase* tc = tcase_create("Core");
 
     tcase_add_test(tc, test_replay_detects_prompts);

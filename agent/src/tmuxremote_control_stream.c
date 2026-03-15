@@ -1,7 +1,7 @@
 #include "tmuxremote_control_stream.h"
 
 #include "tmuxremote.h"
-#include "tmuxremote_prompt_protocol.h"
+#include "pe_protocol.h"
 #include "tmuxremote_stream.h"
 #include "tmuxremote_tmux.h"
 
@@ -340,8 +340,8 @@ static void* reader_thread_func(void* arg)
         memcpy(framed + 4, payload, payloadLen);
         free(payload);
 
-        tmuxremote_prompt_resolve_message resolve;
-        bool ok = tmuxremote_prompt_protocol_decode_resolve(
+        pe_prompt_resolve_message resolve;
+        bool ok = pe_protocol_decode_resolve(
             framed,
             framedLen,
             &resolve);
@@ -354,7 +354,7 @@ static void* reader_thread_func(void* arg)
                 resolve.instance_id,
                 resolve.decision,
                 resolve.keys);
-            tmuxremote_prompt_protocol_free_resolve(&resolve);
+            pe_protocol_free_resolve(&resolve);
         }
     }
 
@@ -448,7 +448,7 @@ static void* monitor_thread_func(void* arg)
             pthread_mutex_unlock(&csl->streamListMutex);
 
             for (int i = 0; i < syncCount; i++) {
-                tmuxremote_prompt_instance* active =
+                pe_prompt_instance* active =
                     tmuxremote_stream_copy_active_prompt_for_ref(
                         &csl->app->streamListener,
                         syncSnapshot[i]->connectionRef);
@@ -456,12 +456,12 @@ static void* monitor_thread_func(void* arg)
                 if (active != NULL) {
                     size_t msgLen = 0;
                     uint8_t* msg =
-                        tmuxremote_prompt_protocol_encode_present(active, &msgLen);
+                        pe_protocol_encode_present(active, &msgLen);
                     if (msg != NULL) {
                         send_to_stream(syncSnapshot[i], msg, msgLen);
                         free(msg);
                     }
-                    tmuxremote_prompt_instance_free(active);
+                    pe_prompt_instance_free(active);
                     free(active);
                 }
 
@@ -670,10 +670,10 @@ static void send_to_ref(struct tmuxremote_control_stream_listener* csl,
 void tmuxremote_control_stream_send_prompt_present_for_ref(
     struct tmuxremote_control_stream_listener* csl,
     NabtoDeviceConnectionRef ref,
-    const tmuxremote_prompt_instance* instance)
+    const pe_prompt_instance* instance)
 {
     size_t msgLen = 0;
-    uint8_t* buf = tmuxremote_prompt_protocol_encode_present(instance, &msgLen);
+    uint8_t* buf = pe_protocol_encode_present(instance, &msgLen);
     if (buf == NULL) {
         return;
     }
@@ -685,10 +685,10 @@ void tmuxremote_control_stream_send_prompt_present_for_ref(
 void tmuxremote_control_stream_send_prompt_update_for_ref(
     struct tmuxremote_control_stream_listener* csl,
     NabtoDeviceConnectionRef ref,
-    const tmuxremote_prompt_instance* instance)
+    const pe_prompt_instance* instance)
 {
     size_t msgLen = 0;
-    uint8_t* buf = tmuxremote_prompt_protocol_encode_update(instance, &msgLen);
+    uint8_t* buf = pe_protocol_encode_update(instance, &msgLen);
     if (buf == NULL) {
         return;
     }
@@ -703,7 +703,7 @@ void tmuxremote_control_stream_send_prompt_gone_for_ref(
     const char* instance_id)
 {
     size_t msgLen = 0;
-    uint8_t* buf = tmuxremote_prompt_protocol_encode_gone(instance_id, &msgLen);
+    uint8_t* buf = pe_protocol_encode_gone(instance_id, &msgLen);
     if (buf == NULL) {
         return;
     }
